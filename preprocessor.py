@@ -53,6 +53,9 @@ quantized_bgr = cv2.cvtColor(quantized_lab, cv2.COLOR_LAB2BGR)
 cv2.imshow("Original", img_bgr)
 cv2.imshow(f"Quantized ({n_colors} Colors)", quantized_lab)
 
-print("Press any key on your keyboard while selecting the image window to close.")
-cv2.waitKey(0)
-cv2.destroyAllWindows()
+# print("Press any key on your keyboard while selecting the image window to close.")
+# cv2.waitKey(0)
+# cv2.destroyAllWindows()
+
+# Reshape the flat labels list back into a 2D (height, width) grid before saving
+np.save('labels.npy', labels.reshape((h, w)))
