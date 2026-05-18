@@ -214,7 +214,7 @@ while True:
             color_masks[c_idx],
             cv2.bitwise_not(winning_safe_zone)
         ) 
-    winning_safe_zone_history.append(winning_safe_zone.copy)
+    winning_safe_zone_history.append(winning_safe_zone.copy())
     # Update the Global Safe Zone (The creeping shadow moves inward!)
     global_safe_zone = winning_safe_zone.copy()
 
@@ -233,7 +233,7 @@ print("--------------------------\n")
 
 # --- STEP 7: SAVE THE FINAL RESULT ---
 # Define the path to the parent directory's output folder
-output_dir = './output_test'
+output_dir = './output_test_bilateral_filter'
 
 # Create the folder if it doesn't already exist
 os.makedirs(output_dir, exist_ok=True)

@@ -14,6 +14,23 @@ if img_bgr is None:
     print(f"Error: Could not load image at {image_path}. Check the file name.")
     exit()
 
+# --- STEP 1.5: IMAGE SIMPLIFICATION (The LIVE Alternative) ---
+print("Simplifying image to remove gradients and noise...")
+
+# 1. Scale up the image to high resolution
+# We double the size (200%) to give the laser cutter smoother curves
+scale_percent = 200
+width = int(img_bgr.shape[1] * scale_percent / 100)
+height = int(img_bgr.shape[0] * scale_percent / 100)
+img_bgr = cv2.resize(img_bgr, (width, height), interpolation=cv2.INTER_CUBIC)
+
+# 2. Apply a Bilateral Filter (The "Cartoon" Filter)
+# Parameters: (image, diameter of pixel neighborhood, sigmaColor, sigmaSpace)
+# We run it 3 times in a row to aggressively melt the gradients into flat colors!
+for _ in range(3):
+    img_bgr = cv2.bilateralFilter(img_bgr, 15, 80, 80)
+
+
 # --- STEP 2: COLOR CONVERSION (BGR to LAB) ---
 img_lab = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2LAB)
 

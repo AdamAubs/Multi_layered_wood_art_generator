@@ -5,3 +5,4 @@ __pycache__/
 *.npy
 
 output_test/
+output_test_bilateral_filter/
