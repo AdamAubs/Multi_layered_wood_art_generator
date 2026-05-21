@@ -7,19 +7,8 @@ __pycache__/
 preprocessor-2.py
 raster-to-vector.py
 
-output_test/
-output_test_bilateral_filter/
-output_test_map/
-output_test_leonardoai/
-output_pyrMeanShiftFiltering_n5/
-output_pyrMeanShiftFiltering_nk/
-output_pyrMeanShiftFiltering_nk_new_generator/
-output_pyrMeanShiftFiltering_nk_new_generator_fair_selection/
-output_pyrMeanShiftFiltering_nk_new_generator_fair_selection_pickup/
-output_test_preprocessor-2_01/
-output_test_vtracer/
-output_test_vtracer_higher_sr/
-vtracer_output/
+image_generator_tests/
+image_postprocessed_tests/
 
 images/Chinese_Pattern_SeaArt_01.png
 images/gemini-2.5-flash-image_Flat_vector_illustration_5_solid_colors_crisp_edges_completely_flat_paint-by-num-0.jpg
