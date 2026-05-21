@@ -1,51 +1,113 @@
+import argparse
+import json
+import os
+
 import cv2
 import numpy as np
+from itertools import combinations
 from sklearn.cluster import KMeans
 from sklearn.metrics import silhouette_score
 
-print("--------------------------\n")
-print("\n Starting preprocessor \n")
-print("--------------------------\n")
 
-# --- STEP 1: LOAD IMAGE ---
-# image_path = 'images/Elgin_map.png'
-image_path = 'images/Chinese_Pattern_Heather.png'
-img_bgr = cv2.imread(image_path)
+def parse_args():
+    parser = argparse.ArgumentParser(
+        description="Preprocess an image into labels.npy and n_colors.npy."
+    )
+    parser.add_argument(
+        "--image",
+        required=True,
+        help="Path to the input image.",
+    )
+    parser.add_argument(
+        "--filter",
+        choices=["meanshift", "bilateral"],
+        default="meanshift",
+        help="Simplification filter to apply before clustering.",
+    )
+    parser.add_argument(
+        "--meanshift-sp",
+        type=int,
+        default=20,
+        help="Mean shift spatial window radius.",
+    )
+    parser.add_argument(
+        "--meanshift-sr",
+        type=int,
+        default=60,
+        help="Mean shift color window radius.",
+    )
+    parser.add_argument(
+        "--meanshift-max-level",
+        type=int,
+        default=2,
+        help="Mean shift pyramid max level.",
+    )
+    parser.add_argument(
+        "--bilateral-d",
+        type=int,
+        default=15,
+        help="Bilateral filter diameter of pixel neighborhood.",
+    )
+    parser.add_argument(
+        "--sigma-color",
+        type=float,
+        default=80.0,
+        help="Bilateral filter sigmaColor.",
+    )
+    parser.add_argument(
+        "--sigma-space",
+        type=float,
+        default=80.0,
+        help="Bilateral filter sigmaSpace.",
+    )
+    parser.add_argument(
+        "--bilateral-passes",
+        type=int,
+        default=3,
+        help="How many times to apply the bilateral filter.",
+    )
+    parser.add_argument(
+        "--out-dir",
+        default="preprocessor_output",
+        help="Output directory for labels.npy and n_colors.npy.",
+    )
+    return parser.parse_args()
 
-if img_bgr is None:
-    print(f"Error: Could not load image at {image_path}. Check the file name.")
-    exit()
 
-# --- STEP 1.5: IMAGE SIMPLIFICATION (The LIVE Alternative) ---
-print("Simplifying image to remove gradients and noise...")
+def load_image(image_path):
+    img_bgr = cv2.imread(image_path)
+    if img_bgr is None:
+        raise FileNotFoundError(
+            f"Error: Could not load image at {image_path}. Check the file name."
+        )
+    return img_bgr
 
-# 1. Scale up the image to high resolution
-# We double the size (200%) to give the laser cutter smoother curves
-# scale_percent = 200
-# width = int(img_bgr.shape[1] * scale_percent / 100)
-# height = int(img_bgr.shape[0] * scale_percent / 100)
-# img_bgr = cv2.resize(img_bgr, (width, height), interpolation=cv2.INTER_CUBIC)
 
-# # # 2. Apply a Bilateral Filter (The "Cartoon" Filter)
-# # Parameters: (image, diameter of pixel neighborhood, sigmaColor, sigmaSpace)
-# # We run it 3 times in a row to aggressively melt the gradients into flat colors!
-# for _ in range(3):
-#     img_bgr = cv2.bilateralFilter(img_bgr, 15, 80, 80)
+def simplify_image(img_bgr, args):
+    print("Simplifying image to remove gradients and noise...")
+    if args.filter == "bilateral":
+        for _ in range(args.bilateral_passes):
+            img_bgr = cv2.bilateralFilter(
+                img_bgr,
+                args.bilateral_d,
+                args.sigma_color,
+                args.sigma_space,
+            )
+        return img_bgr
 
-# # Instead of bilateral loop, try this:
-img_bgr = cv2.pyrMeanShiftFiltering(img_bgr, sp=20, sr=60, maxLevel=2)
-# sp = spatial window radius, sr = color window radius
-# Tweak sr upward (60-80) for fewer, broader color regions
+    return cv2.pyrMeanShiftFiltering(
+        img_bgr,
+        sp=args.meanshift_sp,
+        sr=args.meanshift_sr,
+        maxLevel=args.meanshift_max_level,
+    )
 
-# --- STEP 2: COLOR CONVERSION (BGR to LAB) ---
-img_lab = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2LAB)
 
-# --- STEP 3: FLATTEN IMAGE (The Reshape Step) ---
-# Get the height, width, and number of channels (3 for L, A, B)
-h, w, channels = img_lab.shape
+def derive_run_name(image_path):
+    filename = os.path.basename(image_path)
+    run_name, _ = os.path.splitext(filename)
+    return run_name
 
-# Flatten the 3D grid into a 2D list of pixels
-pixels = img_lab.reshape((-1, 3))
 
 def find_optimal_k(pixels, k_range=range(3, 10)):
     # Sample pixels for speed (silhouette is slow on large arrays)
@@ -79,41 +141,112 @@ def find_optimal_k(pixels, k_range=range(3, 10)):
     print(f"  >>> Auto-selected n_colors = {best_k}")
     return best_k
 
-# --- STEP 4; K-MEANS CLUSTERING ---
-print("Determining optimal color count...")
-n_colors = find_optimal_k(pixels)
 
-print("Running K-Means (this might take a few seconds)...")
-kmeans = KMeans(n_clusters=n_colors, random_state=42)
-kmeans.fit(pixels)
+def run_kmeans(pixels, n_colors):
+    print("Running K-Means (this might take a few seconds)...")
+    kmeans = KMeans(n_clusters=n_colors, random_state=42)
+    kmeans.fit(pixels)
+    centers = kmeans.cluster_centers_.astype(np.uint8)
+    labels = kmeans.labels_
+    return centers, labels
 
-# -- STEP 5: RECONSTRUCT IMAGE ---
-# Grab the 5 "average" colors found by K-means
-# Ensure centers is a proper numpy array of dtype uint8
-centers = kmeans.cluster_centers_.astype(np.uint8)
 
-# Grab the list that tells us which bucket every pixel belongs to
-labels = kmeans.labels_
+def merge_similar_clusters(labels, centers_lab, delta_e_threshold=30.0):
+    """
+    After K-means, merge any two clusters whose LAB centers are within
+    delta_e_threshold of each other (Euclidean distance in LAB ≈ ΔE).
+    Returns updated labels and a mapping from old cluster id to new cluster id.
+    """
+    n = len(centers_lab)
+    # Build a union-find structure to track merges
+    parent = list(range(n))
 
-# Replace every original pixel with its new assigned bucket color
-# Use np.take to avoid indexing issues with certain dtypes
-quantized_pixels = np.take(centers, labels, axis=0)
+    def find(x):
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
 
-# Reshape the flat list back into a 3D image grid
-quantized_lab = quantized_pixels.reshape((h, w, channels))
+    def union(a, b):
+        parent[find(a)] = find(b)
 
-# --- STEP 6: VISUALIZE ---
-# Convert back to BGR so our screen can display it properly
-quantized_bgr = cv2.cvtColor(quantized_lab, cv2.COLOR_LAB2BGR)
+    # Check all pairs of cluster centers
+    for i, j in combinations(range(n), 2):
+        dist = np.linalg.norm(centers_lab[i].astype(float) - centers_lab[j].astype(float))
+        if dist < delta_e_threshold:
+            print(f"  Merging cluster {i} and {j}: LAB distance = {dist:.1f} < {delta_e_threshold}")
+            union(i, j)
 
-# Show the images in pop-up windows
-cv2.imshow("Original", img_bgr)
-cv2.imshow(f"Quantized ({n_colors} Colors)", quantized_lab)
+    # Build remapping: old cluster id -> new sequential id
+    root_to_new = {}
+    new_id = 0
+    remap = {}
+    for k in range(n):
+        root = find(k)
+        if root not in root_to_new:
+            root_to_new[root] = new_id
+            new_id += 1
+        remap[k] = root_to_new[root]
 
-# print("Press any key on your keyboard while selecting the image window to close.")
-# cv2.waitKey(0)
-# cv2.destroyAllWindows()
+    # Apply remapping to every pixel's label
+    new_labels = np.vectorize(remap.get)(labels)
+    n_new = len(set(new_labels.flatten()))
 
-# Reshape the flat labels list back into a 2D (height, width) grid before saving
-np.save('labels.npy', labels.reshape((h, w)))
-np.save('n_colors.npy', np.array([n_colors]))
+    print(f"  Clusters after perceptual merge: {n} → {n_new}")
+    return new_labels, n_new
+
+
+def save_outputs(labels_2d, n_colors, out_dir):
+    os.makedirs(out_dir, exist_ok=True)
+    np.save(os.path.join(out_dir, "labels.npy"), labels_2d)
+    np.save(os.path.join(out_dir, "n_colors.npy"), np.array([n_colors]))
+
+
+def save_run_metadata(out_dir, run_name, image_path):
+    metadata = {
+        "run_name": run_name,
+        "image_path": image_path,
+    }
+    metadata_path = os.path.join(out_dir, "run_metadata.json")
+    with open(metadata_path, "w", encoding="utf-8") as handle:
+        json.dump(metadata, handle, indent=2)
+
+
+def main():
+    print("--------------------------\n")
+    print("\n Starting preprocessor \n")
+    print("--------------------------\n")
+
+    args = parse_args()
+
+    # Load and simplify
+    try:
+        img_bgr = load_image(args.image)
+    except FileNotFoundError as exc:
+        print(exc)
+        return 1
+    img_bgr = simplify_image(img_bgr, args)
+
+    # Convert to LAB and flatten for clustering
+    img_lab = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2LAB)
+    h, w, _ = img_lab.shape
+    pixels = img_lab.reshape((-1, 3))
+
+    print("Determining optimal color count...")
+    n_colors = find_optimal_k(pixels)
+    centers, labels = run_kmeans(pixels, n_colors)
+
+    # Merge perceptually similar clusters before saving
+    labels_2d = labels.reshape((h, w))
+    labels_2d, n_colors = merge_similar_clusters(labels_2d.flatten(), centers)
+    labels_2d = labels_2d.reshape((h, w))
+
+    save_outputs(labels_2d, n_colors, args.out_dir)
+    run_name = derive_run_name(args.image)
+    save_run_metadata(args.out_dir, run_name, args.image)
+    print(f"Saved outputs to '{args.out_dir}'")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
