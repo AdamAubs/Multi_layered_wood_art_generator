@@ -92,3 +92,28 @@ Override input/output directories:
 ```bash
 python postprocessor.py --in-dir output_generator_<run_name> --out-dir output_postprocessed_<run_name>
 ```
+
+DXF export (one DXF with a layer per mask):
+
+```bash
+python postprocessor.py --export-dxf
+```
+
+Optional DXF settings:
+
+```bash
+python postprocessor.py --export-dxf \
+	--dxf-dpi 300 \
+	--dxf-units mm \
+	--dxf-version R12 \
+	--dxf-simplify-epsilon 0.0 \
+	--dxf-layout grid \
+	--dxf-spacing 5 \
+	--dxf-columns 0
+```
+
+Notes:
+
+- DXF export requires ezdxf: `pip install ezdxf`
+- Default scaling is 300 DPI with mm units ($\text{mm} = \text{px} \times 25.4 / 300$). Use `--dxf-dpi` or `--dxf-units px` to change.
+- Default DXF layout is a grid with 5 mm spacing and the frame outline included in each layer. Use `--dxf-layout stacked` or `--dxf-no-frame` to change.
