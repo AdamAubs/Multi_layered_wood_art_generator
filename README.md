@@ -112,6 +112,25 @@ python postprocessor.py --export-dxf \
 	--dxf-columns 0
 ```
 
+#### 4) Png-to-DXF
+
+DXF export (multiple DXFs for each layer mask):
+
+```bash
+for f in output_postprocessed_*/Layer_*.png do python png-to-dxf.py --png "$f" --dpi 300
+```
+
+**How to Set `--dpi`**
+
+```math
+\text{Physical Size (inches)} = \frac{\text{Pixel Dimension}}{\text{DPI}}
+```
+
+**Example 1:** If your PNG is 3000 pixels wide, and you set --dpi 300:
+
+- 3000 ÷ 300 = 10 inches.
+- Your DXF will import into LightBurn exactly 10 inches wide.
+
 Notes:
 
 - DXF export requires ezdxf: `pip install ezdxf`
