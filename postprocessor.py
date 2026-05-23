@@ -244,12 +244,37 @@ def contour_to_points(contour, height, scale, offset):
 
 def frame_outline_points(width, height, scale, offset):
     offset_x, offset_y = offset
+    
+    # Calculate the scaled dimensions
+    w_scaled = (width - 1) * scale
+    h_scaled = (height - 1) * scale
+    
+    # Apply the scale and the positional offset to each corner
     corners = [
-        (0, 0),
-        (width - 1, 0),
-        (width - 1, height - 1),
-        (0, height - 1),
+        (offset_x,            offset_y),            # Bottom-Left (or Top-Left depending on Y-axis)
+        (offset_x + w_scaled, offset_y),            # Bottom-Right
+        (offset_x + w_scaled, offset_y + h_scaled), # Top-Right
+        (offset_x,            offset_y + h_scaled), # Top-Left
     ]
+    return corners
+
+def px_to_point(x_px, y_px, height, scale, offset):
+    """Convert image pixel coords to DXF model point using same convention
+    as contour_to_points (flips Y) and applies offset.
+    """
+    offset_x, offset_y = offset
+    return (
+        float(x_px) * scale + offset_x,
+        float(height - 1 - y_px) * scale + offset_y,
+    )
+
+
+def default_label_height(dxf_units):
+    if dxf_units == "mm":
+        return 5.0
+    if dxf_units == "in":
+        return 0.2
+    return 20.0
     return [
         (
             float(x) * scale + offset_x,
@@ -350,6 +375,23 @@ def export_dxf(
                     frame_points,
                     dxfattribs={"layer": layer_name, "closed": True},
                 )
+
+        # add a small text label near the top-left of this placed layer
+        try:
+            label_height = default_label_height(dxf_units)
+            label_pos = px_to_point(10, 10, height, dxf_scale, offsets[i])
+            # create text on the same layer so it is grouped visually
+            text_kwargs = {"layer": layer_name, "height": label_height}
+            txt = msp.add_text(f"{layer_name}", dxfattribs=text_kwargs)
+            # place text; set_pos available on ezdxf text entity
+            try:
+                txt.set_pos(label_pos, align="LEFT")
+            except Exception:
+                # fallback: set insert point attribute
+                txt.dxf.insert = label_pos
+        except Exception:
+            # don't fail DXF export if text can't be created
+            pass
 
         contours = mask_to_contours(mask, simplify_epsilon)
         for contour in contours:
