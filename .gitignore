@@ -10,6 +10,6 @@ raster-to-vector.py
 image_generator_tests/
 image_postprocessed_tests/
 
-images/Chinese_Pattern_SeaArt_01.png
-images/gemini-2.5-flash-image_Flat_vector_illustration_5_solid_colors_crisp_edges_completely_flat_paint-by-num-0.jpg
-
+output_generator_*/
+output_postprocessed_*/
+preprocessor_output*/

@@ -151,7 +151,7 @@ def run_kmeans(pixels, n_colors):
     return centers, labels
 
 
-def merge_similar_clusters(labels, centers_lab, delta_e_threshold=30.0):
+def merge_similar_clusters(labels, centers_lab, delta_e_threshold=0.0):
     """
     After K-means, merge any two clusters whose LAB centers are within
     delta_e_threshold of each other (Euclidean distance in LAB ≈ ΔE).
