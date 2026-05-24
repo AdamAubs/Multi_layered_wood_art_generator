@@ -202,11 +202,17 @@ def save_outputs(labels_2d, n_colors, out_dir):
     np.save(os.path.join(out_dir, "n_colors.npy"), np.array([n_colors]))
 
 
-def save_run_metadata(out_dir, run_name, image_path):
+def save_run_metadata(out_dir, run_name, image_path, palette=None):
+    """Save run metadata. If `palette` is provided, include it.
+
+    palette: list of dicts with keys: id, rgb, lab, name
+    """
     metadata = {
         "run_name": run_name,
         "image_path": image_path,
     }
+    if palette is not None:
+        metadata["palette"] = palette
     metadata_path = os.path.join(out_dir, "run_metadata.json")
     with open(metadata_path, "w", encoding="utf-8") as handle:
         json.dump(metadata, handle, indent=2)
@@ -243,7 +249,38 @@ def main():
 
     save_outputs(labels_2d, n_colors, args.out_dir)
     run_name = derive_run_name(args.image)
-    save_run_metadata(args.out_dir, run_name, args.image)
+
+    # Build palette: mean color (RGB) and LAB per cluster id
+    palette = []
+    h, w, _ = img_bgr.shape
+    for k in range(n_colors):
+        mask = (labels_2d == k)
+        if np.any(mask):
+            pixels = img_bgr[mask]
+            mean_bgr = pixels.mean(axis=0)
+            # mean_bgr is B, G, R
+            r = int(round(mean_bgr[2]))
+            g = int(round(mean_bgr[1]))
+            b = int(round(mean_bgr[0]))
+            # compute LAB via OpenCV (expects BGR)
+            lab = cv2.cvtColor(
+                np.uint8([[[int(round(mean_bgr[0])), int(round(mean_bgr[1])), int(round(mean_bgr[2]))]]]),
+                cv2.COLOR_BGR2LAB,
+            )[0, 0].tolist()
+        else:
+            # fallback: try to use kmeans centers if present
+            try:
+                c_lab = centers[k]
+                lab = [int(round(c_lab[0])), int(round(c_lab[1])), int(round(c_lab[2]))]
+                bgr = cv2.cvtColor(np.uint8([[[lab[0], lab[1], lab[2]]]]), cv2.COLOR_LAB2BGR)[0, 0]
+                b, g, r = [int(x) for x in bgr]
+            except Exception:
+                r, g, b = 0, 0, 0
+                lab = [0, 0, 0]
+
+        palette.append({"id": int(k), "rgb": [r, g, b], "lab": lab, "name": None})
+
+    save_run_metadata(args.out_dir, run_name, args.image, palette=palette)
     print(f"Saved outputs to '{args.out_dir}'")
     return 0
 
