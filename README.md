@@ -144,13 +144,42 @@ python postprocessor.py --export-dxf
 
 Final fabrication package (per-layer PNG + DXF + handoff markdown):
 
-```bash
+````bash
 # Create the final fabrication package (output_final_<run_name>)
 python postprocessor.py --finalize
 
 # Specify a custom final directory and omit friendly names
 python postprocessor.py --finalize --final-dir output_final_myrun --no-color-names
-```
+
+**Trim Final Package Layers**
+
+You can remove unwanted layers from a `output_final_<run_name>` package and automatically renumber the remaining layers (PNG + DXF) using the small utility `trim_final_layers.py`.
+
+Examples:
+
+```bash
+# Show the planned deletions and renames without changing files
+python trim_final_layers.py --dir output_final_<run_name> --delete 5 --dry-run
+
+# Delete a single layer (index 5) and renumber the rest
+python trim_final_layers.py --dir output_final_<run_name> --delete 5
+
+# Delete a range of layers (3,4,5)
+python trim_final_layers.py --dir output_final_<run_name> --delete 3-5
+
+# Delete multiple non-contiguous layers
+python trim_final_layers.py --dir output_final_<run_name> --delete 2 --delete 8
+````
+
+What it does:
+
+- Removes any files named `Layer_XX_*.png` and `Layer_XX_*.dxf` for the indices you specify.
+- Renumbers surviving `Layer_XX_*` files so indices are contiguous starting at `00`.
+- Updates `handoff.md` to reflect the new layer indices and layer count.
+
+Safety tip: always run the `--dry-run` first to confirm the planned changes before applying them.
+
+````
 
 **DXF converter differences (important)**
 
@@ -159,7 +188,7 @@ python postprocessor.py --finalize --final-dir output_final_myrun --no-color-nam
 
 ```bash
 for f in output_final_*/Layer_*.png; do python png-to-dxf.py --png "$f" --dpi 300; done
-```
+````
 
 Notes about differences in the resulting DXFs:
 
