@@ -237,3 +237,19 @@ Notes:
 ```bash
 python -m py_compile <name-of-file>
 ```
+
+### Citation
+
+If you use this project or build on the method, please cite the paper that inspired it:
+
+```bibtex
+@article{LIU2025104337,
+	title = {Computational multi-layered wood carving art},
+	journal = {Computers & Graphics},
+	volume = {131},
+	pages = {104337},
+	year = {2025},
+	doi = {https://doi.org/10.1016/j.cag.2025.104337},
+	author = {Haochen Liu and Zhi Li and Kang Wu and Youcheng Cai and Xiaoya Zhai and Ketian Zhang and Ligang Liu and Yi Min Xie and Xiao-Ming Fu}
+}
+```
