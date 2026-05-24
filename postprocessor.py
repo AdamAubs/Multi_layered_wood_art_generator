@@ -31,6 +31,11 @@ def parse_args():
         help="Override run name for input/output directories.",
     )
     parser.add_argument(
+        "--run-log",
+        default=None,
+        help="Optional path to a pipeline run log to use as the formatted runtime log.",
+    )
+    parser.add_argument(
         "--meta-dir",
         default="preprocessor_output",
         help="Directory containing run_metadata.json for default naming.",
@@ -1577,6 +1582,109 @@ def main():
         min_area = min(final_areas) if final_areas else 0
         lines.append("\n## Weird fact\n")
         lines.append(f"The smallest final visible layer contains {min_area} pixels ({100.0*min_area/total_pixels:.6f}% of the image).\n")
+
+        # Append a toggleable execution story for novices. Uses an HTML <details>
+        # block so it is hidden by default but viewable if the user expands it.
+        exec_lines = []
+        exec_lines.append("--------------------------")
+        exec_lines.append("Starting Post-Processor")
+        exec_lines.append(f"Loaded {n_layers} layers: color order = {layer_order}")
+        exec_lines.append(f"Image dimensions: {frame.shape[1]}x{frame.shape[0]}")
+        exec_lines.append("All layer images loaded.")
+        exec_lines.append("Reconstructed individual layer masks.")
+
+        # Visible region areas (recompute cleanly here)
+        try:
+            _, visible_areas_exec = compute_visible_regions(individual_masks, frame)
+        except Exception:
+            visible_areas_exec = final_areas
+
+        exec_lines.append("")
+        exec_lines.append(f"Visible region areas (epsilon = {epsilon:.0f} px):")
+        for i in range(min(len(visible_areas_exec), len(layer_order))):
+            pct = 100.0 * visible_areas_exec[i] / total_pixels if total_pixels else 0.0
+            exec_lines.append(f"  Layer {i:02d}  Color {layer_order[i]}  visible = {visible_areas_exec[i]:,} px  ({pct:.2f}%)")
+
+        exec_lines.append("")
+        exec_lines.append(f"Merging complete. {n_layers} layers -> {len(working_masks)} layers.")
+        exec_lines.append(f"Stress-analysis widening: {'enabled' if args.stress_analysis else 'disabled'}")
+
+        # Files produced during finalize
+        try:
+            saved_pngs = [os.path.basename(p['path']) for p in final_layer_pngs]
+        except Exception:
+            saved_pngs = []
+        if saved_pngs:
+            exec_lines.append("")
+            exec_lines.append("Files written to final directory:")
+            for p in saved_pngs:
+                exec_lines.append(f"  {p}")
+
+        # DXF conversion loop shown and any produced .dxf files
+        exec_lines.append("")
+        exec_lines.append(f"DXF conversion loop: {shell_loop}")
+        try:
+            dxf_files = [n for n in os.listdir(final_dir) if n.lower().endswith('.dxf')]
+        except Exception:
+            dxf_files = []
+        if dxf_files:
+            exec_lines.append("DXF files created:")
+            for n in dxf_files:
+                exec_lines.append(f"  {n}")
+
+        exec_lines.append("")
+        exec_lines.append("POST-PROCESSING COMPLETE")
+
+        # Short plain-English explanation for novices (brief and direct)
+        explanation = []
+        explanation.append("This run performed the following steps in order:")
+        explanation.append("1) Loaded the generator outputs (layer order and frame).")
+        explanation.append("2) Reconstructed each layer's individual mask from cumulative images.")
+        explanation.append("3) Measured visible area for each layer and marked tiny layers for merging.")
+        explanation.append("4) Merged very small layers into nearby same-color layers to simplify cutting files.")
+        explanation.append("5) Optionally widened thin parts if stress-analysis was enabled (safer for cutting).")
+        explanation.append("6) Saved per-layer PNGs and run metadata into the final package.")
+        explanation.append("7) Converted final PNGs to DXF using the external tracer loop (one DXF per PNG).")
+        explanation.append("8) Wrote this handoff file with analytics and the list of files produced.")
+
+        # Create a separate runtime log file `runtimelog.md` in the final directory.
+        runtimelog_path = os.path.join(final_dir, "runtimelog.md")
+        if args.run_log and os.path.exists(args.run_log):
+            try:
+                with open(args.run_log, "r", encoding="utf-8") as rf:
+                    formatted_run_log = rf.read()
+            except Exception:
+                formatted_run_log = "\n".join(exec_lines)
+        else:
+            formatted_run_log = "\n".join(exec_lines)
+
+        # Write runtimelog.md: header, formatted run log as a code block, then plain-English bullets.
+        runt_lines = []
+        runt_lines.append(f"# Runtime Log — {run_name}\n\n")
+        runt_lines.append("```text\n")
+        runt_lines.append(formatted_run_log.rstrip() + "\n")
+        runt_lines.append("```\n\n")
+        runt_lines.append("### Plain English explanation\n\n")
+        for s in explanation:
+            runt_lines.append(f"- {s}\n")
+
+        try:
+            with open(runtimelog_path, "w", encoding="utf-8") as rf:
+                rf.write("".join(runt_lines))
+        except Exception:
+            # best-effort: if writing fails, continue but warn on stdout
+            print(f"Warning: could not write runtime log to '{runtimelog_path}'")
+
+        # Write the details block into the handoff markdown (toggleable).
+        # Replace the big formatted run-log block with a short link to runtimelog.md,
+        # and keep the plain-English explanation here for quick viewing.
+        lines.append("\n<details>\n")
+        lines.append("<summary>Execution Story (click to expand)</summary>\n\n")
+        lines.append(f"See runtimelog.md for the formatted run log.\n\n")
+        lines.append("### Plain English explanation\n\n")
+        for s in explanation:
+            lines.append(f"- {s}\n")
+        lines.append("\n</details>\n")
 
         handoff_path = os.path.join(final_dir, "handoff.md")
         with open(handoff_path, "w", encoding="utf-8") as h:

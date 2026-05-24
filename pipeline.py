@@ -96,9 +96,18 @@ def build_output_dir(prefix, run_name, timestamp):
     return f"{base}_{timestamp}" if timestamp else base
 
 
-def run_step(command, label):
+def run_step(command, label, log_path=None):
     print(f"\n--- {label} ---")
-    result = subprocess.run(command)
+    if log_path:
+        # Append header and redirect subprocess stdout/stderr to the log file.
+        with open(log_path, "a", encoding="utf-8") as f:
+            f.write(f"\n\n=== {label} started at {datetime.now().isoformat()} ===\n")
+            f.flush()
+            result = subprocess.run(command, stdout=f, stderr=f)
+            f.write(f"\n=== {label} exited with code {result.returncode} ===\n")
+    else:
+        result = subprocess.run(command)
+
     if result.returncode != 0:
         print(f"[!] {label} failed with exit code {result.returncode}")
     return result.returncode
@@ -120,6 +129,10 @@ def main():
         timestamp,
     )
     final_output = build_output_dir("output_final", run_name, timestamp)
+
+    # Ensure final output directory exists and prepare run log path.
+    os.makedirs(final_output, exist_ok=True)
+    run_log = os.path.join(final_output, "run_log.txt")
 
     python = sys.executable
     preprocessor_cmd = [
@@ -147,7 +160,7 @@ def main():
         args.pre_out_dir,
     ]
 
-    if run_step(preprocessor_cmd, "Preprocessor") != 0:
+    if run_step(preprocessor_cmd, "Preprocessor", run_log) != 0:
         return 1
 
     generator_cmd = [
@@ -159,7 +172,7 @@ def main():
         generator_output,
     ]
 
-    if run_step(generator_cmd, "Generator") != 0:
+    if run_step(generator_cmd, "Generator", run_log) != 0:
         return 1
 
     postprocessor_cmd = [
@@ -174,9 +187,11 @@ def main():
         run_name,
         "--final-dir",
         final_output,
+        "--run-log",
+        run_log,
     ]
 
-    if run_step(postprocessor_cmd, "Postprocessor") != 0:
+    if run_step(postprocessor_cmd, "Postprocessor", run_log) != 0:
         return 1
 
     print(f"\nPipeline complete. Postprocessed output saved to '{post_output}'.")
