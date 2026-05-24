@@ -33,8 +33,9 @@ Outputs:
 
 - Generator: output*generator*<run_name> (or with \_YYYYMMDD_HHMMSS when using --timestamp)
 - Postprocessor: output*postprocessed*<run_name> (or with \_YYYYMMDD_HHMMSS when using --timestamp)
+- Final package: output*final*<run_name> (or with \_YYYYMMDD_HHMMSS when using --timestamp)
 
-The run name is derived from the image filename stem.
+The run name is derived from the image filename stem. The pipeline now ends with `postprocessor.py --finalize`, so the default quick-start path produces both the postprocessed masks and the fabrication-ready final package.
 
 ### Run Each Stage Individually
 
@@ -84,13 +85,15 @@ Outputs:
 Merges small visible regions and rebuilds the cumulative layers.
 
 ```bash
-python postprocessor.py
+python postprocessor.py --finalize
 ```
 
 ~~Stress analysis~~ and widening weak members:
 
 Currently only the widening part of the `--stress-analysis` is implemented due to long of runtimes
 that don't yield accurate results. This needs in depth review.
+
+For the common workflow, use `--finalize` first and only reach for the advanced flags when you are tuning a specific layer or fabrication outcome.
 
 Widening weak members:
 

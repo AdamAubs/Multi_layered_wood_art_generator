@@ -1,0 +1,5 @@
+1. The Coffee Garden Wreath
+   "A circular wreath illustration in flat vector poster style, symmetrical radial composition, featuring stylized coffee beans, a steaming espresso cup at center, lavender sprigs, and chamomile blossoms woven into an interlocking ring that touches all four canvas edges. Exactly 5 flat solid colors: deep espresso brown, warm cream, sage green, dusty lavender, golden yellow. Bold black outlines separating every region, no gradients no shading no texture no photorealism, clean paint-by-numbers style, solid white background."
+
+2. The Herb Garden Medallion
+   "A traditional decorative medallion illustration, radially symmetrical, featuring a mortar and pestle at center surrounded by four panels of culinary herbs — rosemary, basil, thyme, and chamomile — each panel framed by geometric borders. Exactly 4 flat solid colors: forest green, terracotta, ivory white, warm ochre. Every shape separated by bold outlines, large flat fill regions, no gradients no shadows no texture, clean vector graphic style, decorative circular border ring that touches all four canvas edges, solid cream background."
