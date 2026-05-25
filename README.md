@@ -3,7 +3,7 @@
 This project turns an input image into a set of layered, laser-cuttable masks using a three-stage pipeline:
 preprocessor -> generator -> postprocessor.
 
-### Quick Start (Single Command)
+### Quick Start
 
 Create and activate your own virtual environment, then install the project dependencies:
 
@@ -18,6 +18,18 @@ Run the entire pipeline in one command:
 ```bash
 python pipeline.py --image images/GPT4.0/Stylized_crane_with_pine_branches.png
 ```
+
+Best results usually come from images with a small number of clear, flat color regions, strong contrast between shapes, and minimal gradients or texture. Those kinds of images are easier for the clustering and layer-building steps to separate cleanly.
+
+If you are generating a new image, see [image_gen_prompts/generic-reccomendations.md](image_gen_prompts/generic-reccomendations.md) for prompt ideas and composition tips that fit this pipeline well.
+
+If you want the final DXF files to end up at a specific size, add `--fab-size-in`. The value uses `WxH` inches, such as `5x5`, and the pipeline computes the needed DXF DPI automatically:
+
+```bash
+python pipeline.py --image images/GPT4.0/Stylized_crane_with_pine_branches.png --fab-size-in 5x5
+```
+
+This flag sets the final outside size of the DXF, including the frame margin. For now it is intentionally strict: the source image must be square, and non-square images will fail fast instead of being stretched or fit into the box.
 
 Cleanup generated folders:
 
@@ -98,8 +110,9 @@ python postprocessor.py --finalize
 
 ~~Stress analysis~~ and widening weak members:
 
-Currently only the widening part of the `--stress-analysis` is implemented due to long of runtimes
-that don't yield accurate results. This needs in depth review.
+Currently the `--stress-analysis` command will NOT generate a stress analysis. Only the
+optional named flags are currently implemented and tested. The stress analysis needs further review
+due extremely long runtimes with in accurate results.
 
 For the common workflow, use `--finalize` first and only reach for the advanced flags when you are tuning a specific layer or fabrication outcome.
 

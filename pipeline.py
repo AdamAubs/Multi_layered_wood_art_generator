@@ -1,8 +1,11 @@
 import argparse
 import os
+import re
 import subprocess
 import sys
 from datetime import datetime
+
+import cv2
 
 
 def parse_args():
@@ -83,6 +86,11 @@ def parse_args():
         help="Append a YYYYMMDD_HHMMSS timestamp to generator, postprocessor, and final outputs.",
     )
     parser.add_argument(
+        "--fab-size-in",
+        default=None,
+        help="Target final outer DXF size in inches as WxH, for example 5x5. Requires a square source image.",
+    )
+    parser.add_argument(
         "--dxf-frame-margin-mm",
         type=float,
         default=20.0,
@@ -114,6 +122,31 @@ def build_output_dir(prefix, run_name, timestamp):
     return f"{base}_{timestamp}" if timestamp else base
 
 
+def parse_fab_size_in(value):
+    match = re.fullmatch(r"\s*(\d+(?:\.\d+)?)\s*[xX]\s*(\d+(?:\.\d+)?)\s*", value)
+    if not match:
+        raise ValueError("--fab-size-in must use WxH format such as 5x5.")
+
+    width_in = float(match.group(1))
+    height_in = float(match.group(2))
+    if width_in <= 0 or height_in <= 0:
+        raise ValueError("--fab-size-in values must be greater than zero.")
+    if abs(width_in - height_in) > 1e-9:
+        raise ValueError("--fab-size-in currently requires a square target such as 5x5.")
+    return width_in, height_in
+
+
+def compute_dpi_for_outer_size(image_px, target_size_in, frame_margin_mm):
+    outer_size_mm = target_size_in * 25.4
+    inner_size_mm = outer_size_mm - (2.0 * frame_margin_mm)
+    if inner_size_mm <= 0:
+        raise ValueError(
+            "Requested fab size is too small for the configured frame margin. "
+            "Increase --fab-size-in or reduce --dxf-frame-margin-mm."
+        )
+    return image_px * 25.4 / inner_size_mm
+
+
 def run_step(command, label, log_path=None):
     print(f"\n--- {label} ---")
     if log_path:
@@ -135,6 +168,43 @@ def main():
     args = parse_args()
     run_name = derive_run_name(args.image)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S") if args.timestamp else None
+
+    source_image = cv2.imread(args.image, cv2.IMREAD_UNCHANGED)
+    if source_image is None:
+        print(f"Error: Could not load image at {args.image}.")
+        return 1
+    image_h, image_w = source_image.shape[:2]
+
+    dxf_dpi = 300.0
+    if args.fab_size_in is not None:
+        try:
+            target_w_in, target_h_in = parse_fab_size_in(args.fab_size_in)
+        except ValueError as exc:
+            print(f"Error: {exc}")
+            return 1
+
+        if image_w != image_h:
+            print(
+                "Error: --fab-size-in requires a square source image. "
+                f"Got {image_w}x{image_h} px from '{args.image}'."
+            )
+            return 1
+
+        try:
+            dxf_dpi = compute_dpi_for_outer_size(
+                image_w,
+                target_w_in,
+                args.dxf_frame_margin_mm,
+            )
+        except ValueError as exc:
+            print(f"Error: {exc}")
+            return 1
+
+        print(
+            "Using computed DXF DPI "
+            f"{dxf_dpi:.6f} for outer size {target_w_in:g}x{target_h_in:g} in "
+            f"with {args.dxf_frame_margin_mm:.2f} mm frame margin."
+        )
 
     generator_output = args.gen_out_dir or build_output_dir(
         "output_generator",
@@ -214,6 +284,9 @@ def main():
         "--dxf-setting-hole-inset-mm",
         str(args.dxf_setting_hole_inset_mm),
     ]
+
+    if args.fab_size_in is not None:
+        postprocessor_cmd.extend(["--dxf-dpi", f"{dxf_dpi:.12f}"])
 
     if run_step(postprocessor_cmd, "Postprocessor", run_log) != 0:
         return 1

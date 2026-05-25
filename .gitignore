@@ -11,7 +11,6 @@ image_generator_tests/
 image_postprocessed_tests/
 image_gen_prompts/
 
-
 output_final_*/
 output_postprocessed_*/
 output_generator_*/
