@@ -107,6 +107,8 @@ def add_setting_holes(msp, frame_points, hole_inset_mm, hole_diameter_mm):
     max_y = max(ys)
     hole_centers = [
         (min_x + hole_inset_mm, max_y - hole_inset_mm),
+        (max_x - hole_inset_mm, max_y - hole_inset_mm),
+        (min_x + hole_inset_mm, min_y + hole_inset_mm),
         (max_x - hole_inset_mm, min_y + hole_inset_mm),
     ]
     for center_x_mm, center_y_mm in hole_centers:

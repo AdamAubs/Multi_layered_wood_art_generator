@@ -1058,6 +1058,14 @@ def setting_hole_points(width, height, scale, offset, margin_units, inset_units)
         ),
         (
             offset_x + w_scaled + margin_units - inset_units,
+            offset_y + h_scaled + margin_units - inset_units,
+        ),
+        (
+            offset_x - margin_units + inset_units,
+            offset_y - margin_units + inset_units,
+        ),
+        (
+            offset_x + w_scaled + margin_units - inset_units,
             offset_y - margin_units + inset_units,
         ),
     ]
