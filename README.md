@@ -5,10 +5,18 @@ preprocessor -> generator -> postprocessor.
 
 ### Quick Start (Single Command)
 
+Create and activate your own virtual environment, then install the project dependencies:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -r requirements.txt
+```
+
 Run the entire pipeline in one command:
 
 ```bash
-python pipeline.py --image images/Stylized_crane_with_pine_branches.png
+python pipeline.py --image images/GPT4.0/Stylized_crane_with_pine_branches.png
 ```
 
 Cleanup generated folders:
@@ -35,7 +43,7 @@ Outputs:
 - Postprocessor: output*postprocessed*<run_name> (or with \_YYYYMMDD_HHMMSS when using --timestamp)
 - Final package: output*final*<run_name> (or with \_YYYYMMDD_HHMMSS when using --timestamp)
 
-The run name is derived from the image filename stem. The pipeline now ends with `postprocessor.py --finalize`, so the default quick-start path produces both the postprocessed masks and the fabrication-ready final package.
+The run name is derived from the image filename stem.
 
 ### Run Each Stage Individually
 
@@ -44,13 +52,13 @@ The run name is derived from the image filename stem. The pipeline now ends with
 Simplifies the image and creates clustering outputs.
 
 ```bash
-python preprocessor.py --image images/Stylized_crane_with_pine_branches.png
+python preprocessor.py --image images/GPT4.0/Stylized_crane_with_pine_branches.png
 ```
 
 Optional filter settings:
 
 ```bash
-python preprocessor.py --image images/Stylized_crane_with_pine_branches.png \
+python preprocessor.py --image images/GPT4.0/Stylized_crane_with_pine_branches.png \
 	--filter bilateral --bilateral-d 15 --sigma-color 80 --sigma-space 80 --bilateral-passes 3
 ```
 
@@ -144,12 +152,13 @@ python postprocessor.py --export-dxf
 
 Final fabrication package (per-layer PNG + DXF + handoff markdown):
 
-````bash
+```bash
 # Create the final fabrication package (output_final_<run_name>)
 python postprocessor.py --finalize
 
 # Specify a custom final directory and omit friendly names
 python postprocessor.py --finalize --final-dir output_final_myrun --no-color-names
+```
 
 **Trim Final Package Layers**
 
@@ -169,7 +178,7 @@ python trim_final_layers.py --dir output_final_<run_name> --delete 3-5
 
 # Delete multiple non-contiguous layers
 python trim_final_layers.py --dir output_final_<run_name> --delete 2 --delete 8
-````
+```
 
 What it does:
 
@@ -179,21 +188,21 @@ What it does:
 
 Safety tip: always run the `--dry-run` first to confirm the planned changes before applying them.
 
-````
-
-**DXF converter differences (important)**
+**DXF converter differences**
 
 - `--export-dxf` (postprocessor internal): uses the postprocessor's in-memory masks and the `export_dxf()` routine. It converts binary masks to vector contours via `mask_to_contours()` and writes polylines directly into a DXF. This path builds the DXF geometry from the masks in memory and allows layouting multiple layers into a single DXF file.
+
 - `png-to-dxf.py` (standalone tracer): operates on PNG files. It thresholds the image and runs OpenCV's `findContours()` to extract contours, optionally simplifies them with `approxPolyDP`, and writes one DXF per input PNG. When you use `--finalize`, the pipeline saves the final PNGs (including any widenings) and then runs the exact shell loop below which calls `png-to-dxf.py` on those PNGs to produce per-layer DXFs:
 
 ```bash
 for f in output_final_*/Layer_*.png; do python png-to-dxf.py --png "$f" --dpi 300; done
-````
+```
 
 Notes about differences in the resulting DXFs:
 
-- Both converters trace geometry from raster masks, so the widened shapes (from `--stress-analysis`) are present in both outputs — widening is applied before the DXF conversion step.
-- However, contour extraction and simplification settings differ: the internal `export_dxf()` may use different contour retrieval and polygon writing methods (polyline vs lwpolyline, grouping per-layer), while `png-to-dxf.py` uses `findContours()` + `approxPolyDP` which can produce slightly different vertex placements and numbers of contours. These differences affect small details (vertex counts, ordering, tiny artifacts) but not the overall widened silhouette.
+- Both converters trace geometry from raster masks, so the widened shapes (from `--stress-analysis`) are present in both outputs
+- Widening is applied before the DXF conversion step.
+- Contour extraction and simplification settings differ: the internal `export_dxf()` may use different contour retrieval and polygon writing methods (polyline vs lwpolyline, grouping per-layer), while `png-to-dxf.py` uses `findContours()` + `approxPolyDP` which can produce slightly different vertex placements and numbers of contours. These differences affect small details (vertex counts, ordering, tiny artifacts) but not the overall widened silhouette.
 - If you need bit-for-bit identical DXFs from the two paths, use one path consistently and tune the `--dxf-simplify-epsilon` (postprocessor) or `--simplify` (png-to-dxf) parameters to match results.
 
 ### Tuning simplification (examples)
@@ -259,13 +268,11 @@ for f in output_postprocessed_*/Layer_*.png; do python png-to-dxf.py --png "$f" 
 
 Notes:
 
-- DXF export requires ezdxf: `pip install ezdxf`
 - Default scaling is 300 DPI with mm units ($\text{mm} = \text{px} \times 25.4 / 300$). Use `--dxf-dpi` or `--dxf-units px` to change.
 - Default DXF layout is a grid with 5 mm spacing and the frame outline included in each layer. Use `--dxf-layout stacked` or `--dxf-no-frame` to change.
-- The outer frame now sits 20 mm beyond the artwork contour by default, and each layer includes two 2.5 mm setting holes centered 10 mm in from the top-left and bottom-right frame corners.
+- The outer frame now sits 20 mm beyond the artwork contour by default, and each layer includes four 2.5 mm setting holes centered 10 mm in each frame corner.
 - Use `--dxf-frame-margin-mm`, `--dxf-setting-hole-diameter-mm`, and `--dxf-setting-hole-inset-mm` to tune that geometry in the internal DXF export path. The standalone `png-to-dxf.py` script uses the same defaults.
 - You can pass the same `--dxf-*` options to `pipeline.py`; it forwards them into the final DXF generation step.
-- Stress analysis is optional and off by default. It adds an iterative widening pass before the normal postprocessor outputs are written.
 
 ### Building notes
 

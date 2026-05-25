@@ -1,0 +1,8 @@
+cairosvg
+numpy
+opencv-python
+scikit-learn
+scipy
+ezdxf
+vtracer
+webcolors
