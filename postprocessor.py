@@ -104,6 +104,24 @@ def parse_args():
         help="Do not include the frame outline with each layer.",
     )
     parser.add_argument(
+        "--dxf-frame-margin-mm",
+        type=float,
+        default=20.0,
+        help="Extra margin in mm between each layer contour and its outer frame.",
+    )
+    parser.add_argument(
+        "--dxf-setting-hole-diameter-mm",
+        type=float,
+        default=2.5,
+        help="Diameter in mm for the two corner setting holes.",
+    )
+    parser.add_argument(
+        "--dxf-setting-hole-inset-mm",
+        type=float,
+        default=10.0,
+        help="Inset in mm from each outer frame corner to the hole center.",
+    )
+    parser.add_argument(
         "--stress-analysis", action="store_true", default=False,
         help="Run FEA stress analysis and widen weak members (paper Section 3.5).",
     )
@@ -1002,21 +1020,47 @@ def contour_to_points(contour, height, scale, offset):
     ]
 
 
-def frame_outline_points(width, height, scale, offset):
+def mm_to_units(mm_value, dxf_units, dxf_dpi):
+    if dxf_units == "mm":
+        return float(mm_value)
+    if dxf_units == "in":
+        return float(mm_value) / 25.4
+    if dxf_units == "px":
+        return float(mm_value) * dxf_dpi / 25.4
+    raise ValueError(f"Unsupported DXF units: {dxf_units}")
+
+
+def frame_outline_points(width, height, scale, offset, margin_units):
     offset_x, offset_y = offset
     
     # Calculate the scaled dimensions
     w_scaled = (width - 1) * scale
     h_scaled = (height - 1) * scale
     
-    # Apply the scale and the positional offset to each corner
+    # Apply the scale, the positional offset, and the requested margin.
     corners = [
-        (offset_x,            offset_y),            # Bottom-Left (or Top-Left depending on Y-axis)
-        (offset_x + w_scaled, offset_y),            # Bottom-Right
-        (offset_x + w_scaled, offset_y + h_scaled), # Top-Right
-        (offset_x,            offset_y + h_scaled), # Top-Left
+        (offset_x - margin_units,            offset_y - margin_units),            # Bottom-Left
+        (offset_x + w_scaled + margin_units, offset_y - margin_units),            # Bottom-Right
+        (offset_x + w_scaled + margin_units, offset_y + h_scaled + margin_units), # Top-Right
+        (offset_x - margin_units,            offset_y + h_scaled + margin_units), # Top-Left
     ]
     return corners
+
+
+def setting_hole_points(width, height, scale, offset, margin_units, inset_units):
+    offset_x, offset_y = offset
+    w_scaled = (width - 1) * scale
+    h_scaled = (height - 1) * scale
+    return [
+        (
+            offset_x - margin_units + inset_units,
+            offset_y + h_scaled + margin_units - inset_units,
+        ),
+        (
+            offset_x + w_scaled + margin_units - inset_units,
+            offset_y - margin_units + inset_units,
+        ),
+    ]
 
 def px_to_point(x_px, y_px, height, scale, offset):
     """Convert image pixel coords to DXF model point using same convention
@@ -1072,12 +1116,16 @@ def export_dxf(
     frame,
     dxf_version,
     dxf_units,
+    dxf_dpi,
     dxf_scale,
     simplify_epsilon,
     layout,
     spacing,
     columns,
     include_frame,
+    frame_margin_mm,
+    setting_hole_diameter_mm,
+    setting_hole_inset_mm,
 ):
     try:
         import ezdxf
@@ -1102,6 +1150,9 @@ def export_dxf(
 
     height = frame.shape[0]
     width = frame.shape[1]
+    margin_units = mm_to_units(frame_margin_mm, dxf_units, dxf_dpi)
+    hole_radius_units = mm_to_units(setting_hole_diameter_mm / 2.0, dxf_units, dxf_dpi)
+    hole_inset_units = mm_to_units(setting_hole_inset_mm, dxf_units, dxf_dpi)
     offsets = compute_layout_offsets(
         len(working_masks),
         width,
@@ -1118,7 +1169,13 @@ def export_dxf(
             doc.layers.new(name=layer_name, dxfattribs={"color": 7})
 
         if include_frame:
-            frame_points = frame_outline_points(width, height, dxf_scale, offsets[i])
+            frame_points = frame_outline_points(
+                width,
+                height,
+                dxf_scale,
+                offsets[i],
+                margin_units,
+            )
             if dxf_version == "R12":
                 msp.add_polyline2d(
                     frame_points,
@@ -1128,6 +1185,21 @@ def export_dxf(
                 msp.add_lwpolyline(
                     frame_points,
                     dxfattribs={"layer": layer_name, "closed": True},
+                )
+
+        if include_frame:
+            for hole_center in setting_hole_points(
+                width,
+                height,
+                dxf_scale,
+                offsets[i],
+                margin_units,
+                hole_inset_units,
+            ):
+                msp.add_circle(
+                    hole_center,
+                    hole_radius_units,
+                    dxfattribs={"layer": layer_name},
                 )
 
         # add a small text label near the top-left of this placed layer
@@ -1517,7 +1589,15 @@ def main():
             # DXF conversion happens after all PNGs are written, via the exact shell loop.
 
         # Convert the final PNGs to DXFs using the exact shell loop requested.
-        shell_loop = 'for f in output_final_*/Layer_*.png; do python png-to-dxf.py --png "$f" --dpi 300; done'
+        shell_loop = (
+            'for f in output_final_*/Layer_*.png; do '
+            'python png-to-dxf.py --png "$f" --dpi '
+            f'{args.dxf_dpi} '
+            f'--frame-margin-mm {args.dxf_frame_margin_mm} '
+            f'--setting-hole-diameter-mm {args.dxf_setting_hole_diameter_mm} '
+            f'--setting-hole-inset-mm {args.dxf_setting_hole_inset_mm}; '
+            'done'
+        )
         print(f"Running DXF conversion loop: {shell_loop}")
         env = os.environ.copy()
         env["PATH"] = os.path.dirname(sys.executable) + os.pathsep + env.get("PATH", "")
@@ -1712,12 +1792,16 @@ def main():
             frame,
             args.dxf_version,
             args.dxf_units,
+            args.dxf_dpi,
             dxf_scale,
             args.dxf_simplify_epsilon,
             args.dxf_layout,
             args.dxf_spacing,
             args.dxf_columns,
             args.dxf_include_frame,
+            args.dxf_frame_margin_mm,
+            args.dxf_setting_hole_diameter_mm,
+            args.dxf_setting_hole_inset_mm,
         ):
             return 1
 

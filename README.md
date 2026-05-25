@@ -262,6 +262,9 @@ Notes:
 - DXF export requires ezdxf: `pip install ezdxf`
 - Default scaling is 300 DPI with mm units ($\text{mm} = \text{px} \times 25.4 / 300$). Use `--dxf-dpi` or `--dxf-units px` to change.
 - Default DXF layout is a grid with 5 mm spacing and the frame outline included in each layer. Use `--dxf-layout stacked` or `--dxf-no-frame` to change.
+- The outer frame now sits 20 mm beyond the artwork contour by default, and each layer includes two 2.5 mm setting holes centered 10 mm in from the top-left and bottom-right frame corners.
+- Use `--dxf-frame-margin-mm`, `--dxf-setting-hole-diameter-mm`, and `--dxf-setting-hole-inset-mm` to tune that geometry in the internal DXF export path. The standalone `png-to-dxf.py` script uses the same defaults.
+- You can pass the same `--dxf-*` options to `pipeline.py`; it forwards them into the final DXF generation step.
 - Stress analysis is optional and off by default. It adds an iterative widening pass before the normal postprocessor outputs are written.
 
 ### Building notes

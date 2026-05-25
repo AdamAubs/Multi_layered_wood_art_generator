@@ -82,6 +82,24 @@ def parse_args():
         action="store_true",
         help="Append a YYYYMMDD_HHMMSS timestamp to generator, postprocessor, and final outputs.",
     )
+    parser.add_argument(
+        "--dxf-frame-margin-mm",
+        type=float,
+        default=20.0,
+        help="Extra margin in mm between the artwork contour and the outer frame.",
+    )
+    parser.add_argument(
+        "--dxf-setting-hole-diameter-mm",
+        type=float,
+        default=2.5,
+        help="Diameter in mm for the two corner setting holes.",
+    )
+    parser.add_argument(
+        "--dxf-setting-hole-inset-mm",
+        type=float,
+        default=10.0,
+        help="Inset in mm from each outer frame corner to the hole center.",
+    )
     return parser.parse_args()
 
 
@@ -189,6 +207,12 @@ def main():
         final_output,
         "--run-log",
         run_log,
+        "--dxf-frame-margin-mm",
+        str(args.dxf_frame_margin_mm),
+        "--dxf-setting-hole-diameter-mm",
+        str(args.dxf_setting_hole_diameter_mm),
+        "--dxf-setting-hole-inset-mm",
+        str(args.dxf_setting_hole_inset_mm),
     ]
 
     if run_step(postprocessor_cmd, "Postprocessor", run_log) != 0:

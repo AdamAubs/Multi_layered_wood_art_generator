@@ -45,6 +45,24 @@ def parse_args():
         default=2,
         help="ACI color index for the frame rectangle (default 2 = yellow, distinct from cut lines).",
     )
+    parser.add_argument(
+        "--frame-margin-mm",
+        type=float,
+        default=20.0,
+        help="Extra margin in mm between the contour and the outer frame.",
+    )
+    parser.add_argument(
+        "--setting-hole-diameter-mm",
+        type=float,
+        default=2.5,
+        help="Diameter in mm for the two corner setting holes.",
+    )
+    parser.add_argument(
+        "--setting-hole-inset-mm",
+        type=float,
+        default=10.0,
+        help="Inset in mm from each outer frame corner to the hole center.",
+    )
     
     return parser.parse_args()
 
@@ -79,6 +97,22 @@ def extract_cut_contours(mask_gray, cut_white=True, simplify_epsilon=0.5):
     return simplified
 
 
+def add_setting_holes(msp, frame_points, hole_inset_mm, hole_diameter_mm):
+    radius_mm = hole_diameter_mm / 2.0
+    xs = [point[0] for point in frame_points]
+    ys = [point[1] for point in frame_points]
+    min_x = min(xs)
+    max_x = max(xs)
+    min_y = min(ys)
+    max_y = max(ys)
+    hole_centers = [
+        (min_x + hole_inset_mm, max_y - hole_inset_mm),
+        (max_x - hole_inset_mm, min_y + hole_inset_mm),
+    ]
+    for center_x_mm, center_y_mm in hole_centers:
+        msp.add_circle((center_x_mm, center_y_mm), radius_mm, dxfattribs={"color": 1})
+
+
 def write_dxf(
     contours,
     out_path,
@@ -88,6 +122,9 @@ def write_dxf(
     dxf_version="R2000",
     add_frame=True,
     frame_color=2,
+    frame_margin_mm=20.0,
+    setting_hole_diameter_mm=2.5,
+    setting_hole_inset_mm=10.0,
 ):
     """Write contours as LWPOLYLINE entities plus an optional frame rectangle."""
     try:
@@ -95,7 +132,7 @@ def write_dxf(
     except ImportError:
         raise ImportError("ezdxf is required: pip install ezdxf")
 
-    doc = ezdxf.new(dxf_version)
+    doc = ezdxf.new(dxf_version)  # type: ignore[attr-defined]
     # Explicitly set units to Millimeters
     doc.header['$INSUNITS'] = 4
     msp = doc.modelspace()
@@ -113,24 +150,39 @@ def write_dxf(
         if len(points) >= 2:
             msp.add_lwpolyline(points, close=True, dxfattribs={"color": 1})
 
-    # --- Outer frame rectangle ---
-    # Draws a closed rectangle that exactly matches the image boundary,
-    # so every layer sheet shares the same outer edge for alignment.
-    if add_frame:
-        w_mm = px_to_mm(img_w, dpi)
-        h_mm = px_to_mm(img_h, dpi)
+    w_mm = px_to_mm(img_w, dpi)
+    h_mm = px_to_mm(img_h, dpi)
+    frame_points = None
 
+    # --- Outer frame rectangle ---
+    # Draws a closed rectangle that sits outside the artwork by the requested margin.
+    if add_frame:
         frame_points = [
-            (0.0,  0.0),
-            (w_mm, 0.0),
-            (w_mm, h_mm),
-            (0.0,  h_mm),
+            (-frame_margin_mm, -frame_margin_mm),
+            (w_mm + frame_margin_mm, -frame_margin_mm),
+            (w_mm + frame_margin_mm, h_mm + frame_margin_mm),
+            (-frame_margin_mm, h_mm + frame_margin_mm),
         ]
         msp.add_lwpolyline(
             frame_points,
             close=True,
             dxfattribs={"color": frame_color},
         )
+
+    if frame_points is None:
+        frame_points = [
+            (-frame_margin_mm, -frame_margin_mm),
+            (w_mm + frame_margin_mm, -frame_margin_mm),
+            (w_mm + frame_margin_mm, h_mm + frame_margin_mm),
+            (-frame_margin_mm, h_mm + frame_margin_mm),
+        ]
+
+    add_setting_holes(
+        msp,
+        frame_points=frame_points,
+        hole_inset_mm=setting_hole_inset_mm,
+        hole_diameter_mm=setting_hole_diameter_mm,
+    )
 
     doc.saveas(out_path)
 
@@ -165,12 +217,24 @@ def main():
         dpi=args.dpi,
         add_frame=not args.no_frame,
         frame_color=args.frame_color,
+        frame_margin_mm=args.frame_margin_mm,
+        setting_hole_diameter_mm=args.setting_hole_diameter_mm,
+        setting_hole_inset_mm=args.setting_hole_inset_mm,
     )
     print(f"  Saved: {out_path}")
     if not args.no_frame:
         w_mm = px_to_mm(w, args.dpi)
         h_mm = px_to_mm(h, args.dpi)
-        print(f"  Frame: {w_mm:.2f} mm × {h_mm:.2f} mm (color index {args.frame_color})")
+        outer_w_mm = w_mm + 2.0 * args.frame_margin_mm
+        outer_h_mm = h_mm + 2.0 * args.frame_margin_mm
+        print(
+            f"  Frame: {outer_w_mm:.2f} mm × {outer_h_mm:.2f} mm "
+            f"(margin {args.frame_margin_mm:.2f} mm, color index {args.frame_color})"
+        )
+    print(
+        f"  Setting holes: 2 × {args.setting_hole_diameter_mm:.2f} mm "
+        f"(inset {args.setting_hole_inset_mm:.2f} mm from the frame corners)"
+    )
 
 
 if __name__ == "__main__":

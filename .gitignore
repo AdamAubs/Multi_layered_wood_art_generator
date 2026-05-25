@@ -9,6 +9,7 @@ raster-to-vector.py
 
 image_generator_tests/
 image_postprocessed_tests/
+image_gen_prompts/
 
 
 output_final_*/
