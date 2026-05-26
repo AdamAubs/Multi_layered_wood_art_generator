@@ -244,7 +244,12 @@ def resolve_run_name(args):
 def resolve_dirs(args, run_name):
     input_dir = args.in_dir
     if not input_dir and run_name:
-        input_dir = f"output_generator_{run_name}"
+        postprocessed_dir = f"output_postprocessed_{run_name}"
+        generator_dir = f"output_generator_{run_name}"
+        if args.finalize and os.path.exists(postprocessed_dir):
+            input_dir = postprocessed_dir
+        else:
+            input_dir = generator_dir
 
     output_dir = args.out_dir
     if not output_dir and run_name:

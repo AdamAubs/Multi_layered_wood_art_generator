@@ -173,6 +173,21 @@ python postprocessor.py --finalize
 python postprocessor.py --finalize --final-dir output_final_myrun --no-color-names
 ```
 
+If you run `--stress-analysis` in a separate step first, `--finalize` now prefers the matching `output_postprocessed_<run_name>` directory when it exists. That keeps the widened masks from the earlier postprocessing pass instead of rebuilding from the original generator output.
+
+To test that behavior end to end:
+
+```bash
+# 1) Rebuild the postprocessed masks with widening enabled
+python postprocessor.py --stress-analysis --thin-min-width 4 --thin-widen-to 8
+
+# 2) Create the final package from the widened postprocessed output
+python postprocessor.py --finalize
+```
+
+After step 2, compare the layer PNGs or the layer areas in `output_final_<run_name>/handoff.md` against `output_postprocessed_<run_name>/`.
+The final package should match the widened geometry, not the original generator size.
+
 **Trim Final Package Layers**
 
 You can remove unwanted layers from a `output_final_<run_name>` package and automatically renumber the remaining layers (PNG + DXF) using the small utility `trim_final_layers.py`.
