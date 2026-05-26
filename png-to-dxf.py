@@ -87,10 +87,16 @@ def extract_cut_contours(mask_gray, cut_white=True, simplify_epsilon=0.5):
 
     contours, _ = cv2.findContours(target, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
 
+    image_area = float(mask_gray.shape[0] * mask_gray.shape[1])
+
     simplified = []
     for cnt in contours:
         if simplify_epsilon > 0:
             cnt = cv2.approxPolyDP(cnt, simplify_epsilon, closed=True)
+        x, y, w, h = cv2.boundingRect(cnt)
+        touches_full_border = x <= 0 and y <= 0 and (x + w) >= mask_gray.shape[1] and (y + h) >= mask_gray.shape[0]
+        if touches_full_border and cv2.contourArea(cnt) >= 0.98 * image_area:
+            continue
         if len(cnt) >= 3:
             simplified.append(cnt)
 

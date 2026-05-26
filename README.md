@@ -201,6 +201,26 @@ What it does:
 
 Safety tip: always run the `--dry-run` first to confirm the planned changes before applying them.
 
+**French Cleat Backing**
+
+You can add a French cleat / keyhole backing to the final stack after the package has already been decided. The cleat tool inspects the back of the final package, keeps the existing art layers when possible, and appends up to two blank back layers only when the keyhole or clearance cavity would collide with contours.
+
+Example:
+
+```bash
+python add_french_cleats.py --dir output_final_<run_name> --dry-run
+python add_french_cleats.py --dir output_final_<run_name>
+```
+
+What it does:
+
+- Places a keyhole-style wall mount near the top-center of the back stack.
+- Uses the existing back layers when the cleat geometry has enough clearance.
+- Appends up to two blank layers only when the current back stack would collide with the keyhole or cavity.
+- Regenerates the touched DXFs so the vector output matches the updated PNGs.
+
+Safety tip: start with `--dry-run` so you can see whether the tool will use existing layers or append new back layers before it writes anything.
+
 **DXF converter differences**
 
 - `--export-dxf` (postprocessor internal): uses the postprocessor's in-memory masks and the `export_dxf()` routine. It converts binary masks to vector contours via `mask_to_contours()` and writes polylines directly into a DXF. This path builds the DXF geometry from the masks in memory and allows layouting multiple layers into a single DXF file.
