@@ -7,6 +7,7 @@ from dataclasses import dataclass
 
 import cv2
 import numpy as np
+import json
 
 
 LAYER_FILE_RE = re.compile(r"^Layer_(\d{2})_(.+)\.(png|dxf)$")
@@ -102,6 +103,17 @@ def parse_args():
         default=10.0,
         help="Setting-hole inset passed through to DXF regeneration.",
     )
+    parser.add_argument(
+        "--stock-size-in",
+        default=None,
+        help="Optional stock sheet size in inches as WxH (e.g. 12x20). When provided, the layout-cut-generator will be refreshed after changes.",
+    )
+    parser.add_argument(
+        "--layout-gap-mm",
+        type=float,
+        default=5.0,
+        help="Gap in mm to use when generating combined stock layout DXFs.",
+    )
     return parser.parse_args()
 
 
@@ -119,6 +131,8 @@ def load_layers(directory):
     for name in os.listdir(directory):
         match = LAYER_FILE_RE.match(name)
         if not match or match.group(3) != "png":
+            continue
+        if match.group(2).startswith("french_cleat_"):
             continue
         index = int(match.group(1))
         label = match.group(2)
@@ -238,6 +252,23 @@ def write_png(image, path):
         raise OSError(f"Failed to write image: {path}")
 
 
+def remove_existing_french_cleat_files(directory):
+    removed = []
+    for name in os.listdir(directory):
+        match = LAYER_FILE_RE.match(name)
+        if not match:
+            continue
+        if not match.group(2).startswith("french_cleat_"):
+            continue
+        path = os.path.join(directory, name)
+        try:
+            os.remove(path)
+            removed.append(name)
+        except OSError:
+            pass
+    return removed
+
+
 def regenerate_dxf(png_path, args):
     return regenerate_dxf_with_frame(png_path, args)
 
@@ -259,6 +290,44 @@ def regenerate_dxf_with_frame(png_path, args):
         f"{args.setting_hole_inset_mm}",
     ]
     subprocess.run(command, check=True)
+
+
+def infer_layout_refresh_config(final_dir):
+    metadata_path = os.path.join(final_dir, "layout-cut-generator_metadata.json")
+    if not os.path.exists(metadata_path):
+        return None
+    try:
+        with open(metadata_path, "r", encoding="utf-8") as handle:
+            metadata = json.load(handle)
+        stock_mm = metadata.get("stock_mm")
+        if not (isinstance(stock_mm, list) and len(stock_mm) == 2):
+            return None
+        stock_w_in = float(stock_mm[0]) / 25.4
+        stock_h_in = float(stock_mm[1]) / 25.4
+        gap_mm = float(metadata.get("gap_mm", 5.0))
+        return f"{stock_w_in:g}x{stock_h_in:g}", gap_mm
+    except Exception:
+        return None
+
+
+def refresh_layout_cut_generator(final_dir, stock_size_in, gap_mm):
+    layout_script = os.path.join(os.path.dirname(__file__), "layout_cut_generator.py")
+    layout_cmd = [
+        sys.executable,
+        layout_script,
+        "--dir",
+        final_dir,
+        "--stock-size-in",
+        stock_size_in,
+        "--gap-mm",
+        str(gap_mm),
+    ]
+    print("Refreshing layout-cut-generator DXFs...")
+    result = subprocess.run(layout_cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    print(result.stdout, end="")
+    if result.returncode != 0:
+        print(f"Warning: layout cut generator refresh failed with exit code {result.returncode}")
+    return result.returncode
 
 
 def update_handoff(directory, added_layers, keyhole_layer, cavity_layer, args):
@@ -324,6 +393,12 @@ def overlay_white(image, mask):
 def main():
     args = parse_args()
     directory = ensure_final_package(args.dir)
+
+    if not args.dry_run:
+        removed = remove_existing_french_cleat_files(directory)
+        if removed:
+            print(f"Removed existing French cleat files: {', '.join(sorted(removed))}")
+
     layers = load_layers(directory)
 
     image_masks = [load_image_mask(layer.png_path) for layer in layers]
@@ -409,6 +484,20 @@ def main():
 
     if added_layers > 0:
         update_handoff(directory, added_layers, output_layers[keyhole_target], output_layers[cavity_target], args)
+
+    # Optionally refresh combined layout DXFs so the final package stays in sync
+    layout_stock_size = args.stock_size_in
+    layout_gap_mm = args.layout_gap_mm
+    if not layout_stock_size:
+        inferred = infer_layout_refresh_config(directory)
+        if inferred is not None:
+            layout_stock_size, layout_gap_mm = inferred
+
+    if layout_stock_size:
+        try:
+            refresh_layout_cut_generator(directory, layout_stock_size, layout_gap_mm)
+        except Exception as exc:
+            print(f"Warning: failed to refresh layout-cut-generator: {exc}")
 
     print("Done.")
     return 0

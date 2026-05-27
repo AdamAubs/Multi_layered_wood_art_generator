@@ -177,6 +177,8 @@ If you run `--stress-analysis` in a separate step first, `--finalize` now prefer
 
 If the final package already has stock-layout metadata, or you pass `--stock-size-in`, `--finalize` also refreshes `layout-cut-generator.dxf` and its metadata so the combined stock layout stays in sync with the updated layer DXFs.
 
+When you run `add_french_cleats.py --dir output_final_<run_name>`, the script now also refreshes `layout-cut-generator.dxf` (using an inferred stock size from existing metadata, or pass `--stock-size-in` to force a specific sheet size). This keeps the combined layout in sync after adding cleat/backing layers.
+
 To test that behavior end to end:
 
 ```bash
