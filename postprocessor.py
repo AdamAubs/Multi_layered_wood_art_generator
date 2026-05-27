@@ -122,6 +122,17 @@ def parse_args():
         help="Inset in mm from each outer frame corner to the hole center.",
     )
     parser.add_argument(
+        "--stock-size-in",
+        default=None,
+        help="Optional stock sheet size in inches as WxH (e.g. 12x20). When provided, finalize also refreshes layout-cut-generator DXFs.",
+    )
+    parser.add_argument(
+        "--layout-gap-mm",
+        type=float,
+        default=5.0,
+        help="Gap in mm to use when generating combined stock layout DXFs.",
+    )
+    parser.add_argument(
         "--stress-analysis", action="store_true", default=False,
         help="Run FEA stress analysis and widen weak members (paper Section 3.5).",
     )
@@ -256,6 +267,63 @@ def resolve_dirs(args, run_name):
         output_dir = f"output_postprocessed_{run_name}"
 
     return input_dir, output_dir
+
+
+def parse_stock_size_in(value):
+    match = re.fullmatch(r"\s*(\d+(?:\.\d+)?)\s*[xX]\s*(\d+(?:\.\d+)?)\s*", value)
+    if not match:
+        raise ValueError("--stock-size-in must use WxH format such as 12x20.")
+
+    width_in = float(match.group(1))
+    height_in = float(match.group(2))
+    if width_in <= 0 or height_in <= 0:
+        raise ValueError("--stock-size-in values must be greater than zero.")
+    return width_in, height_in
+
+
+def refresh_layout_cut_generator(final_dir, stock_size_in, gap_mm, run_log=None):
+    layout_script = os.path.join(os.path.dirname(__file__), "layout_cut_generator.py")
+    layout_cmd = [
+        sys.executable,
+        layout_script,
+        "--dir",
+        final_dir,
+        "--stock-size-in",
+        stock_size_in,
+        "--gap-mm",
+        str(gap_mm),
+    ]
+    print("\nRefreshing layout-cut-generator DXFs...")
+    result = subprocess.run(layout_cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    if run_log:
+        with open(run_log, "a", encoding="utf-8") as handle:
+            handle.write("\n\n=== Layout-Cut-Generator refresh started ===\n")
+            handle.write(" ".join(layout_cmd) + "\n")
+            handle.write(result.stdout)
+            handle.write(f"\n=== Layout-Cut-Generator refresh exited with code {result.returncode} ===\n")
+    else:
+        print(result.stdout, end="")
+    if result.returncode != 0:
+        print(f"Warning: layout cut generator refresh failed with exit code {result.returncode}")
+    return result.returncode
+
+
+def infer_layout_refresh_config(final_dir):
+    metadata_path = os.path.join(final_dir, "layout-cut-generator_metadata.json")
+    if not os.path.exists(metadata_path):
+        return None
+    try:
+        with open(metadata_path, "r", encoding="utf-8") as handle:
+            metadata = json.load(handle)
+        stock_mm = metadata.get("stock_mm")
+        if not (isinstance(stock_mm, list) and len(stock_mm) == 2):
+            return None
+        stock_w_in = float(stock_mm[0]) / 25.4
+        stock_h_in = float(stock_mm[1]) / 25.4
+        gap_mm = float(metadata.get("gap_mm", 5.0))
+        return f"{stock_w_in:g}x{stock_h_in:g}", gap_mm
+    except Exception:
+        return None
 
 
 def resolve_dxf_path(args, run_name, output_dir):
@@ -1634,6 +1702,16 @@ def main():
                 continue
             colorized = _colorize_white_mask(mask_gray, layer["rgb"])
             cv2.imwrite(layer["path"], colorized)
+
+        layout_stock_size = args.stock_size_in
+        layout_gap_mm = args.layout_gap_mm
+        if not layout_stock_size:
+            inferred = infer_layout_refresh_config(final_dir)
+            if inferred is not None:
+                layout_stock_size, layout_gap_mm = inferred
+
+        if layout_stock_size:
+            refresh_layout_cut_generator(final_dir, layout_stock_size, layout_gap_mm, run_log=args.run_log)
 
         # Copy run metadata into final dir if available
         src_meta = os.path.join(args.meta_dir, "run_metadata.json")

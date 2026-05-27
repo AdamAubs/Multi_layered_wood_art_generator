@@ -91,6 +91,11 @@ def parse_args():
         help="Target final outer DXF size in inches as WxH, for example 5x5. Requires a square source image.",
     )
     parser.add_argument(
+        "--stock-size-in",
+        default=None,
+        help="Optional stock sheet size in inches as WxH (e.g. 12x20). When provided a combined layout DXF will be created and added to the final package.",
+    )
+    parser.add_argument(
         "--dxf-frame-margin-mm",
         type=float,
         default=20.0,
@@ -133,6 +138,19 @@ def parse_fab_size_in(value):
         raise ValueError("--fab-size-in values must be greater than zero.")
     if abs(width_in - height_in) > 1e-9:
         raise ValueError("--fab-size-in currently requires a square target such as 5x5.")
+    return width_in, height_in
+
+
+def parse_stock_size_in(value):
+    """Parse a WxH stock size in inches; non-square allowed."""
+    match = re.fullmatch(r"\s*(\d+(?:\.\d+)?)\s*[xX]\s*(\d+(?:\.\d+)?)\s*", value)
+    if not match:
+        raise ValueError("--stock-size-in must use WxH format such as 12x20.")
+
+    width_in = float(match.group(1))
+    height_in = float(match.group(2))
+    if width_in <= 0 or height_in <= 0:
+        raise ValueError("--stock-size-in values must be greater than zero.")
     return width_in, height_in
 
 
@@ -287,6 +305,14 @@ def main():
 
     if args.fab_size_in is not None:
         postprocessor_cmd.extend(["--dxf-dpi", f"{dxf_dpi:.12f}"])
+
+    if args.stock_size_in is not None:
+        postprocessor_cmd.extend([
+            "--stock-size-in",
+            args.stock_size_in,
+            "--layout-gap-mm",
+            "5.0",
+        ])
 
     if run_step(postprocessor_cmd, "Postprocessor", run_log) != 0:
         return 1
