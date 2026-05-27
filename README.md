@@ -13,10 +13,10 @@ source .venv/bin/activate
 python -m pip install -r requirements.txt
 ```
 
-Run the entire pipeline in one command:
+Run the entire pipeline in one command (optionally produce a combined stock layout):
 
 ```bash
-python pipeline.py --image images/GPT4.0/Stylized_crane_with_pine_branches.png
+python pipeline.py --image images/GPT4.0/Stylized_crane_with_pine_branches.png --stock-size-in 12x20
 ```
 
 Best results usually come from images with a small number of clear, flat color regions, strong contrast between shapes, and minimal gradients or texture. Those kinds of images are easier for the clustering and layer-building steps to separate cleanly.
@@ -301,8 +301,6 @@ python postprocessor.py --export-dxf \
 
 DXF export (multiple DXFs for each layer mask):
 
-````
-
 **Combined stock layout**
 
 You can generate a single combined DXF that arranges all final layer DXFs into a stock-sized sheet using the pipeline flag `--stock-size-in` or the standalone generator.
@@ -315,7 +313,7 @@ python pipeline.py --image images/GPT4.0/The_Whisk_and_Wildflower_Wreath.png --s
 
 # Or run the layout generator against an existing final package
 python layout_cut_generator.py --dir output_final_The_Whisk_and_Wildflower_Wreath --stock-size-in 12x20
-````
+```
 
 The generator creates `layout-cut-generator.dxf` and `layout-cut-generator_metadata.json` inside the final package directory. When you run `postprocessor.py --finalize` with `--stock-size-in`, or when an existing final package already has layout metadata, the same combined layout files are refreshed automatically.
 
