@@ -1,3 +1,5 @@
+
+# Python Pipeline
 mwca_env/
 __pycache__/
 *.py[cod]
@@ -16,3 +18,7 @@ output_postprocessed_*/
 output_generator_*/
 preprocessor_output*/
 
+# Go Server
+server/.env
+server/api
+server/bin/

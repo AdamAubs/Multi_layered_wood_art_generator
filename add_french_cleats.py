@@ -88,7 +88,7 @@ def parse_args():
     parser.add_argument(
         "--frame-margin-mm",
         type=float,
-        default=20.0,
+        default=15.0,
         help="Frame margin passed through to DXF regeneration.",
     )
     parser.add_argument(

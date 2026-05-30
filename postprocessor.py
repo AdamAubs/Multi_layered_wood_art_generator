@@ -106,7 +106,7 @@ def parse_args():
     parser.add_argument(
         "--dxf-frame-margin-mm",
         type=float,
-        default=20.0,
+        default=15.0,
         help="Extra margin in mm between each layer contour and its outer frame.",
     )
     parser.add_argument(

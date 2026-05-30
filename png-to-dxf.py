@@ -48,7 +48,7 @@ def parse_args():
     parser.add_argument(
         "--frame-margin-mm",
         type=float,
-        default=20.0,
+        default=15.0,
         help="Extra margin in mm between the contour and the outer frame.",
     )
     parser.add_argument(
@@ -130,7 +130,7 @@ def write_dxf(
     dxf_version="R2000",
     add_frame=True,
     frame_color=2,
-    frame_margin_mm=20.0,
+    frame_margin_mm=15.0,
     setting_hole_diameter_mm=2.5,
     setting_hole_inset_mm=10.0,
 ):
