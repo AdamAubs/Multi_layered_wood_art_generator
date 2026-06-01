@@ -2,9 +2,6 @@
 
 This is the thin Go HTTP layer for the Multi Layered Wood Art Generator project
 
-# Server
-
-This is the thin Go HTTP layer for the Multi Layered Wood Art Generator project.
 
 ## What it does
 
