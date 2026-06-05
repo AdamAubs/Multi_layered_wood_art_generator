@@ -42,19 +42,23 @@ function App() {
     <main className="container">
       <h1>Multi-layered Wood Art Generator</h1>
 
-      <label>
-        Image path
-        <input
-          value={imagePath}
-          onChange={(e) => setImagePath(e.currentTarget.value)}
-          placeholder="/absolute/path/to/image.png"
-          disabled={isRunning}
-        />
-      </label>
+      <div className="start-container">
+        <div className="input-container">
+          <label>
+            Image path
+            <input
+              value={imagePath}
+              onChange={(e) => setImagePath(e.currentTarget.value)}
+              placeholder="/absolute/path/to/image.png"
+              disabled={isRunning}
+            />
+          </label>
 
-      <button onClick={runPipeline} disabled={isRunning}>
-        {isRunning ? `Running...${elapsedSec}s` : "Run pipeline"}
-      </button>
+          <button onClick={runPipeline} disabled={isRunning}>
+            {isRunning ? `Running...${elapsedSec}s` : "Run pipeline"}
+          </button>
+        </div>
+      </div>
 
       {isRunning && <p>Working in background. The app is still responsive.</p>}
       <pre>{status}</pre>
