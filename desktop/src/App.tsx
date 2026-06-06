@@ -1,42 +1,91 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import reactLogo from "./assets/react.svg";
 import { invoke } from "@tauri-apps/api/core";
 import "./App.css";
 
+type JobStatus =
+  | "idle"
+  | "preprocessing"
+  | "generating"
+  | "postprocessing"
+  | "complete"
+  | "failed";
+
+type JobSnapshot = {
+  job_id: string;
+  status: JobStatus;
+  elapsed_sec: number;
+  message: string;
+  error: string | null;
+};
+
+function isRunningStatus(status: JobStatus) {
+  return (
+    status === "preprocessing" ||
+    status === "generating" ||
+    status === "postprocessing"
+  );
+}
+
+function isTerminal(status: JobStatus) {
+  return status === "complete" || status === "failed";
+}
+
 function App() {
   const [imagePath, setImagePath] = useState("");
-  const [status, setStatus] = useState("");
-  const [isRunning, setIsRunning] = useState(false);
-  const [elapsedSec, setElapsedSec] = useState(0);
+  const [job, setJob] = useState<JobSnapshot | null>(null);
+  const [uiError, setUiError] = useState("");
+  const pollRef = useRef<number | null>(null);
 
-  useEffect(() => {
-    if (!isRunning) return;
-    const id = window.setInterval(() => setElapsedSec((s) => s + 1), 1000);
-    return () => window.clearInterval(id);
-  }, [isRunning]);
+  async function fetchStatus() {
+    const latest = await invoke<JobSnapshot>("get_job_status");
+    setJob(latest);
 
-  async function runPipeline() {
+    if (isTerminal(latest.status) && pollRef.current !== null) {
+      window.clearInterval(pollRef.current);
+      pollRef.current = null;
+    }
+  }
+
+  async function startJob() {
+    setUiError("");
+
     const trimmed = imagePath.trim();
     if (!trimmed) {
-      setStatus("Please enter an image path before running.");
+      setUiError("Please enter an image path first.");
       return;
     }
 
-    setIsRunning(true);
-    setElapsedSec(0);
-    setStatus("Running pipeline...");
-
     try {
-      const result = await invoke<string>("run_pipeline", {
+      const started = await invoke<JobSnapshot>("start_job", {
         imagePath: trimmed,
       });
-      setStatus(`Success:\n${result}`);
-    } catch (error) {
-      setStatus(`Failed:\n${String(error)}`);
-    } finally {
-      setIsRunning(false);
+      setJob(started);
+
+      if (pollRef.current !== null) {
+        window.clearInterval(pollRef.current);
+      }
+
+      pollRef.current = window.setInterval(() => {
+        fetchStatus().catch((e) => {
+          setUiError(String(e));
+        });
+      }, 1000);
+    } catch (e) {
+      setUiError(String(e));
     }
   }
+
+  useEffect(() => {
+    fetchStatus().catch((e) => setUiError(String(e)));
+    return () => {
+      if (pollRef.current !== null) {
+        window.clearInterval(pollRef.current);
+      }
+    };
+  }, []);
+
+  const isRunning = job ? isRunningStatus(job.status) : false;
 
   return (
     <main className="container">
@@ -54,14 +103,37 @@ function App() {
             />
           </label>
 
-          <button onClick={runPipeline} disabled={isRunning}>
-            {isRunning ? `Running...${elapsedSec}s` : "Run pipeline"}
+          <button onClick={startJob} disabled={isRunning}>
+            {isRunning ? "Job running..." : "Start job"}
           </button>
         </div>
       </div>
 
-      {isRunning && <p>Working in background. The app is still responsive.</p>}
-      <pre>{status}</pre>
+      <section className="status-card">
+        <p>
+          <strong>Status:</strong> {job?.status ?? "idle"}
+        </p>
+        <p>
+          <strong>Job ID:</strong> {job?.job_id ?? "none"}
+        </p>
+        <p>
+          <strong>Elapsed:</strong> {job?.elapsed_sec ?? 0}s
+        </p>
+        <p>
+          <strong>Message:</strong> {job?.message ?? "No job started yet."}
+        </p>
+        {job?.error && (
+          <p className="error-text">
+            <strong>Error:</strong> {job.error}
+          </p>
+        )}
+
+        {uiError && (
+          <p className="error-text">
+            <strong>UI Error: {uiError} </strong>{" "}
+          </p>
+        )}
+      </section>
     </main>
   );
 }
