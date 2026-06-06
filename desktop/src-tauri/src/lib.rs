@@ -1,15 +1,15 @@
-// Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
+use std::fs::File;
+use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
-use std::process::Command;
+use std::process::{Command, Stdio};
 use std::sync::{Mutex, OnceLock};
 use std::thread;
-use std::time::{Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-// Derive adds auo-generated implementations: Debug print, Clone copy-by-value, etc.
+// ─── Job status enum ──────────────────────────────────────────────────────────
+
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
-
-// Serialize enum values as snake_case string in JSON: "preprocessing", "complete", etc.
 #[serde(rename_all = "snake_case")]
 enum JobStatus {
     Idle,
@@ -20,7 +20,25 @@ enum JobStatus {
     Failed,
 }
 
-// Internal backend state (not serialized directly to frontend)
+// ─── Rich data types (sent to frontend) ──────────────────────────────────────
+
+// One detected color from the preprocessor palette.
+#[derive(Debug, Clone, Serialize)]
+struct PaletteColor {
+    id: u32,
+    rgb: [u8; 3],
+}
+
+// The winning color chosen for one generator layer.
+#[derive(Debug, Clone, Serialize)]
+struct LayerWinner {
+    layer: u32,
+    color_id: u32,
+    patches: u64,
+}
+
+// ─── Internal job state (not serialized directly) ─────────────────────────────
+
 #[derive(Debug, Clone)]
 struct JobState {
     job_id: String,
@@ -28,33 +46,44 @@ struct JobState {
     started_at: Instant,
     message: String,
     error: Option<String>,
+    // Preprocessor results
+    n_colors: Option<u32>,
+    palette: Vec<PaletteColor>,
+    // Generator results
+    current_layer: Option<u32>,
+    winner_history: Vec<LayerWinner>,
+    // Postprocessor results
+    final_dir: Option<String>,
 }
 
-// Snapshot sent to frontend polling call.
+// ─── Serializable snapshot sent to frontend ───────────────────────────────────
+
 #[derive(Debug, Clone, Serialize)]
 struct JobSnapshot {
     job_id: String,
     status: JobStatus,
     elapsed_sec: u64,
     message: String,
-    error: Option<String>
+    error: Option<String>,
+    n_colors: Option<u32>,
+    palette: Vec<PaletteColor>,
+    current_layer: Option<u32>,
+    winner_history: Vec<LayerWinner>,
+    final_dir: Option<String>,
 }
 
-// Global singleton store: one job at a time, wrapped in Mutex for thread safety.
+// ─── Global single-job store ──────────────────────────────────────────────────
+
 static JOB_STATE: OnceLock<Mutex<Option<JobState>>> = OnceLock::new();
 
-// Helper that return global store, initializing it once.
 fn job_store() -> &'static Mutex<Option<JobState>> {
     JOB_STATE.get_or_init(|| Mutex::new(None))
 }
 
-// Helper: terminal states where no further updates are expected
 fn is_terminal(status: JobStatus) -> bool {
     matches!(status, JobStatus::Complete | JobStatus::Failed)
 }
 
-
-// Helper: milliseconds since Unix epoch, used to build a simple unique-ish id. 
 fn now_millis() -> u128 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -62,7 +91,6 @@ fn now_millis() -> u128 {
         .unwrap_or(0)
 }
 
-// Convert internal state to frontend-safe snapshot.
 fn snapshot_from_state(state: &JobState) -> JobSnapshot {
     JobSnapshot {
         job_id: state.job_id.clone(),
@@ -70,159 +98,426 @@ fn snapshot_from_state(state: &JobState) -> JobSnapshot {
         elapsed_sec: state.started_at.elapsed().as_secs(),
         message: state.message.clone(),
         error: state.error.clone(),
+        n_colors: state.n_colors,
+        palette: state.palette.clone(),
+        current_layer: state.current_layer,
+        winner_history: state.winner_history.clone(),
+        final_dir: state.final_dir.clone(),
     }
 }
 
+// ─── Focused state-update helpers (each mutates only one field) ───────────────
 
-// Expose this function as a Tauri command callable from frontend
+fn set_status(job_id: &str, status: JobStatus, message: String, error: Option<String>) {
+    if let Ok(mut g) = job_store().lock() {
+        if let Some(s) = g.as_mut() {
+            if s.job_id == job_id {
+                s.status = status;
+                s.message = message;
+                s.error = error;
+            }
+        }
+    }
+}
+
+fn set_message(job_id: &str, message: String) {
+    if let Ok(mut g) = job_store().lock() {
+        if let Some(s) = g.as_mut() {
+            if s.job_id == job_id {
+                s.message = message;
+            }
+        }
+    }
+}
+
+fn set_n_colors(job_id: &str, n: u32) {
+    if let Ok(mut g) = job_store().lock() {
+        if let Some(s) = g.as_mut() {
+            if s.job_id == job_id {
+                s.n_colors = Some(n);
+            }
+        }
+    }
+}
+
+fn set_current_layer(job_id: &str, layer: u32) {
+    if let Ok(mut g) = job_store().lock() {
+        if let Some(s) = g.as_mut() {
+            if s.job_id == job_id {
+                s.current_layer = Some(layer);
+                // Only update the visible message while still in the generating stage.
+                // If we are already postprocessing or later, a stale log-tail read
+                // should not overwrite the more current status message.
+                if s.status == JobStatus::Generating {
+                    s.message = format!("Generator: calculating layer {}...", layer);
+                }
+            }
+        }
+    }
+}
+
+fn push_winner(job_id: &str, winner: LayerWinner) {
+    if let Ok(mut g) = job_store().lock() {
+        if let Some(s) = g.as_mut() {
+            if s.job_id == job_id {
+                s.winner_history.push(winner);
+            }
+        }
+    }
+}
+
+fn set_palette(job_id: &str, palette: Vec<PaletteColor>) {
+    if let Ok(mut g) = job_store().lock() {
+        if let Some(s) = g.as_mut() {
+            if s.job_id == job_id {
+                s.palette = palette;
+            }
+        }
+    }
+}
+
+fn set_final_dir(job_id: &str, dir: String) {
+    if let Ok(mut g) = job_store().lock() {
+        if let Some(s) = g.as_mut() {
+            if s.job_id == job_id {
+                s.final_dir = Some(dir);
+            }
+        }
+    }
+}
+
+// Returns true if the job is done (or unknown). Used to stop background threads.
+fn job_is_terminal(job_id: &str) -> bool {
+    if let Ok(g) = job_store().lock() {
+        if let Some(s) = g.as_ref() {
+            if s.job_id == job_id {
+                return is_terminal(s.status);
+            }
+        }
+    }
+    true
+}
+
+// ─── Line parsers for run_log.txt ─────────────────────────────────────────────
+
+// Matches: "  >>> Auto-selected n_colors = 5"
+fn try_parse_n_colors(line: &str, job_id: &str) {
+    if let Some(rest) = line.trim().strip_prefix(">>> Auto-selected n_colors = ") {
+        if let Ok(n) = rest.trim().parse::<u32>() {
+            set_n_colors(job_id, n);
+        }
+    }
+}
+
+// Matches: "--- Calculating Layer 0 ---"
+fn try_parse_layer(line: &str, job_id: &str) {
+    let trimmed = line.trim();
+    if let Some(rest) = trimmed.strip_prefix("--- Calculating Layer ") {
+        let digits: String = rest.chars().take_while(|c| c.is_ascii_digit()).collect();
+        if let Ok(n) = digits.parse::<u32>() {
+            set_current_layer(job_id, n);
+        }
+    }
+}
+
+// Matches: "WINNER: Layer 0 → Color 4 (988739 patches connected)"
+// Note: → is Unicode U+2192
+fn try_parse_winner(line: &str, job_id: &str) {
+    let trimmed = line.trim();
+    if !trimmed.starts_with("WINNER: Layer ") {
+        return;
+    }
+    let rest = &trimmed["WINNER: Layer ".len()..];
+
+    // Split on " → " (with unicode arrow)
+    let arrow = " \u{2192} ";
+    let mut parts = rest.splitn(2, arrow);
+    let layer_str = match parts.next() { Some(s) => s, None => return };
+    let color_part = match parts.next() { Some(s) => s, None => return };
+
+    let layer: u32 = match layer_str.trim().parse() {
+        Ok(n) => n,
+        Err(_) => return,
+    };
+
+    // color_part = "Color 4 (988739 patches connected)"
+    let color_rest = color_part.strip_prefix("Color ").unwrap_or(color_part);
+    let mut color_iter = color_rest.splitn(2, " (");
+    let color_id_str = match color_iter.next() { Some(s) => s, None => return };
+    let patches_part = color_iter.next().unwrap_or("");
+
+    let color_id: u32 = match color_id_str.trim().parse() {
+        Ok(n) => n,
+        Err(_) => return,
+    };
+    let patches: u64 = {
+        let digits: String = patches_part.chars().take_while(|c| c.is_ascii_digit()).collect();
+        digits.parse().unwrap_or(0)
+    };
+
+    push_winner(job_id, LayerWinner { layer, color_id, patches });
+}
+
+// Reads preprocessor_output/run_metadata.json and loads the palette.
+// Called once when pipeline.py stdout shows "--- Generator ---" (preprocessor is done).
+fn try_load_palette(repo_root: &PathBuf, job_id: &str) {
+    let path = repo_root.join("preprocessor_output/run_metadata.json");
+    if !path.is_file() {
+        return;
+    }
+    let content = match std::fs::read_to_string(&path) {
+        Ok(c) => c,
+        Err(_) => return,
+    };
+
+    // These structs are only used here for JSON parsing so they stay local.
+    #[derive(Deserialize)]
+    struct RawMeta { palette: Vec<RawColor> }
+    #[derive(Deserialize)]
+    struct RawColor { id: u32, rgb: Vec<u8> }
+
+    let meta: RawMeta = match serde_json::from_str(&content) {
+        Ok(m) => m,
+        Err(_) => return,
+    };
+
+    let palette: Vec<PaletteColor> = meta.palette.into_iter().map(|c| PaletteColor {
+        id: c.id,
+        rgb: [
+            c.rgb.first().copied().unwrap_or(0),
+            c.rgb.get(1).copied().unwrap_or(0),
+            c.rgb.get(2).copied().unwrap_or(0),
+        ],
+    }).collect();
+
+    set_palette(job_id, palette);
+}
+
+// ─── Log-tail background thread ───────────────────────────────────────────────
+//
+// Waits for run_log.txt to appear, then reads it line-by-line as the pipeline
+// writes it. Parses n_colors, per-layer progress, and winner selections.
+
+fn tail_run_log(run_log_path: PathBuf, job_id: String) {
+    // Wait up to 60 seconds for the file to exist (pipeline creates it early).
+    let timeout = Duration::from_secs(60);
+    let mut waited = Duration::ZERO;
+
+    while !run_log_path.exists() {
+        if waited >= timeout || job_is_terminal(&job_id) {
+            return;
+        }
+        thread::sleep(Duration::from_millis(500));
+        waited += Duration::from_millis(500);
+    }
+
+    let file = match File::open(&run_log_path) {
+        Ok(f) => f,
+        Err(_) => return,
+    };
+
+    let mut reader = BufReader::new(file);
+    let mut line = String::new();
+
+    loop {
+        line.clear();
+        match reader.read_line(&mut line) {
+            // 0 bytes = no new content yet; wait briefly and retry.
+            Ok(0) => {
+                if job_is_terminal(&job_id) {
+                    break;
+                }
+                thread::sleep(Duration::from_millis(250));
+            }
+            Ok(_) => {
+                let l = line.trim();
+                try_parse_n_colors(l, &job_id);
+                try_parse_layer(l, &job_id);
+                if l.starts_with("WINNER:") {
+                    try_parse_winner(l, &job_id);
+                }
+            }
+            Err(_) => break,
+        }
+    }
+}
+
+// ─── Tauri commands ───────────────────────────────────────────────────────────
+
 #[tauri::command]
 fn start_job(image_path: String) -> Result<JobSnapshot, String> {
-    // Trim whitespace
     let trimmed = image_path.trim().to_string();
 
-    // Validate non-empty path.
     if trimmed.is_empty() {
         return Err("Please choose an image path first.".to_string());
     }
-
-    // Validate that file exists.
-    let image = PathBuf::from(&trimmed);
-    if !image.is_file() {
+    if !PathBuf::from(&trimmed).is_file() {
         return Err(format!("Image path does not exist: {trimmed}"));
-    }    
+    }
 
-    // Lock global job store; map lock poisoning to a user-friendly error
     let mut guard = job_store()
         .lock()
         .map_err(|_| "Failed to lock job state.".to_string())?;
 
-    // Enforce single active job.
     if let Some(existing) = guard.as_ref() {
         if !is_terminal(existing.status) {
             return Err("A job is already running. Please wait for it to finish.".to_string());
         }
     }
 
-    // Make job id
     let job_id = format!("job-{}", now_millis());
+
+    // Derive run_name the same way pipeline.py does (image filename without extension).
+    let run_name = PathBuf::from(&trimmed)
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("unknown")
+        .to_string();
 
     let initial = JobState {
         job_id: job_id.clone(),
         status: JobStatus::Preprocessing,
         started_at: Instant::now(),
-        message: "Pipeline started. Running preprocessor...".to_string(),
+        message: "Pipeline started...".to_string(),
         error: None,
+        n_colors: None,
+        palette: Vec::new(),
+        current_layer: None,
+        winner_history: Vec::new(),
+        final_dir: None,
     };
 
-    // Save initial state globally.
     *guard = Some(initial.clone());
     drop(guard);
-    
-    thread::spawn(move || {
-        // Helper to update state safely in one place
-        let update_state = |status: JobStatus, message: String, error: Option<String>| {
-            if let Ok(mut g) = job_store().lock() {
-                if let Some(state) = g.as_mut() {
-                    if state.job_id == job_id {
-                        state.status = status;
-                        state.message = message;
-                        state.error = error;
-                    }
-                }
-            }
-        };
 
+    thread::spawn(move || {
         let repo_root = match PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("../..")
             .canonicalize()
         {
-            Ok(path) => path,
+            Ok(p) => p,
             Err(e) => {
-                update_state(
-                    JobStatus::Failed,
-                    "Could not resolve repo root".to_string(),
-                    Some(e.to_string()),
-                );
+                set_status(&job_id, JobStatus::Failed,
+                    "Could not resolve repo root.".to_string(), Some(e.to_string()));
                 return;
             }
         };
 
         let python_path = repo_root.join("mwca_env/bin/python");
         if !python_path.is_file() {
-            update_state(
-                JobStatus::Failed,
+            set_status(&job_id, JobStatus::Failed,
                 "Python interpreter not found.".to_string(),
-                Some(format!(
-                    "Expected interpreter at {}",
-                    python_path.display()
-                )),
-            );
+                Some(format!("Expected at {}", python_path.display())));
             return;
         }
 
-        // Run pipeline process and wait for completion
-        let output = match Command::new(&python_path)
+        // Start the log-tail thread before launching the process so it catches
+        // early writes (preprocessor output appears quickly).
+        let log_path = repo_root.join(format!("output_final_{}/run_log.txt", run_name));
+        {
+            let lp = log_path.clone();
+            let lj = job_id.clone();
+            thread::spawn(move || tail_run_log(lp, lj));
+        }
+
+        // Launch pipeline.py with stdout piped so we can read it line-by-line.
+        // stderr is inherited so errors still appear in the dev terminal.
+        let mut child = match Command::new(&python_path)
+            .arg("-u")
             .arg("pipeline.py")
             .arg("--image")
-            .arg(trimmed)
+            .arg(&trimmed)
             .current_dir(&repo_root)
-            .output()
+            .stdout(Stdio::piped())
+            .stderr(Stdio::inherit())
+            .spawn()
         {
-            Ok(o) => o,
+            Ok(c) => c,
             Err(e) => {
-                update_state(
-                    JobStatus::Failed,
-                    "Failed to start pipeline process.".to_string(),
-                    Some(e.to_string()),
-                );
+                set_status(&job_id, JobStatus::Failed,
+                    "Failed to start pipeline process.".to_string(), Some(e.to_string()));
                 return;
             }
         };
 
-        // Update final status based on process exit code.
-        if output.status.success() {
-            update_state(
-                JobStatus::Complete,
-                "Pipeline finished successfully.".to_string(),
-                None,
-            );
-        } else {
-            let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-            let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        // ── Parse pipeline.py stdout for stage transitions ──
+        // pipeline.py prints "\n--- Preprocessor ---", "\n--- Generator ---", etc.
+        // via run_step(). These are the authoritative stage boundary markers.
+        if let Some(stdout) = child.stdout.take() {
+            for line in BufReader::new(stdout).lines().flatten() {
+                let l = line.trim().to_string();
 
-            let err = if !stderr.is_empty() {
-                stderr
-            } else if !stdout.is_empty() {
-                stdout
-            } else {
-                "Pipeline failed without output.".to_string()
-            };
+                if l.contains("--- Preprocessor ---") {
+                    set_status(&job_id, JobStatus::Preprocessing,
+                        "Preprocessing image...".to_string(), None);
 
-            update_state(JobStatus::Failed, "Pipeline failed.".to_string(), Some(err));
+                } else if l.contains("--- Generator ---") {
+                    set_status(&job_id, JobStatus::Generating,
+                        "Generator building layers...".to_string(), None);
+                    // Preprocessor just finished — safe to read palette now.
+                    try_load_palette(&repo_root, &job_id);
+
+                } else if l.contains("--- Postprocessor ---") {
+                    set_status(&job_id, JobStatus::Postprocessing,
+                        "Postprocessor finalizing layers...".to_string(), None);
+
+                } else if l.starts_with("Final fabrication package saved to") {
+                    // Capture the output directory shown in the success message.
+                    let dir = l
+                        .trim_start_matches("Final fabrication package saved to '")
+                        .trim_end_matches("'.")
+                        .trim_end_matches('\'')
+                        .to_string();
+                    set_final_dir(&job_id, dir);
+
+                } else if !l.is_empty() {
+                    // Show any other pipeline output as the live status message.
+                    set_message(&job_id, l);
+                }
+            }
+        }
+
+        // ── Set final terminal status from process exit code ──
+        match child.wait() {
+            Ok(exit) if exit.success() => {
+                set_status(&job_id, JobStatus::Complete,
+                    "Pipeline finished successfully.".to_string(), None);
+            }
+            Ok(_) => {
+                set_status(&job_id, JobStatus::Failed,
+                    "Pipeline exited with an error. Check the dev terminal for details.".to_string(),
+                    None);
+            }
+            Err(e) => {
+                set_status(&job_id, JobStatus::Failed,
+                    "Pipeline process lost.".to_string(), Some(e.to_string()));
+            }
         }
     });
 
     Ok(snapshot_from_state(&initial))
 }
 
-// Polling command for frontend
 #[tauri::command]
 fn get_job_status() -> Result<JobSnapshot, String> {
     let guard = job_store()
         .lock()
         .map_err(|_| "Failed to lock job state.".to_string())?;
 
-    // If a job exists, return snapshot.
     if let Some(state) = guard.as_ref() {
         Ok(snapshot_from_state(state))
     } else {
-        // Else return idle snapshot.
         Ok(JobSnapshot {
             job_id: "none".to_string(),
             status: JobStatus::Idle,
             elapsed_sec: 0,
-            message: "No job has been started yet".to_string(),
+            message: "No job has been started yet.".to_string(),
             error: None,
+            n_colors: None,
+            palette: Vec::new(),
+            current_layer: None,
+            winner_history: Vec::new(),
+            final_dir: None,
         })
     }
 }

@@ -17,6 +17,11 @@ type JobSnapshot = {
   elapsed_sec: number;
   message: string;
   error: string | null;
+  n_colors: number | null;
+  palette: { id: number; rgb: [number, number, number] }[];
+  current_layer: number | null;
+  winner_history: { layer: number; color_id: number; patches: number }[];
+  final_dir: string | null;
 };
 
 function isRunningStatus(status: JobStatus) {
@@ -121,6 +126,29 @@ function App() {
         </p>
         <p>
           <strong>Message:</strong> {job?.message ?? "No job started yet."}
+        </p>
+        <p>
+          <strong>Number of Colors chosen:</strong> {job?.n_colors ?? "N/A."}
+        </p>
+        <p>
+          <strong>Color Palette :</strong>{" "}
+          {job?.palette?.map((color) => (
+            <span key={color.id} style={{ marginRight: "8px" }}>
+              <span
+                style={{
+                  display: "inline-block",
+                  width: "16px",
+                  height: "16px",
+                  backgroundColor: `rgb(${color.rgb[0]}, ${color.rgb[1]}, ${color.rgb[2]})`,
+                  border: "1px solid #ccc",
+                }}
+              />
+              {` ID: ${color.id}`}
+            </span>
+          ))}
+        </p>
+        <p>
+          <strong>Final directory:</strong> {job?.final_dir ?? "N/A."}
         </p>
         {job?.error && (
           <p className="error-text">

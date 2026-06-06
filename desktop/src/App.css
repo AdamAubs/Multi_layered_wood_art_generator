@@ -80,7 +80,7 @@ input:disabled {
   width: min(900px, 92vw);
   margin: 24px auto 0;
   text-align: left;
-  background: rgba(255, 255, 255, 0.65);
+  background: rgba(255, 255, 255, 0.2);
   border: 1px solid #d7d7d7;
   border-radius: 10px;
 }
