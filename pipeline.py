@@ -4,7 +4,6 @@ import re
 import subprocess
 import sys
 from datetime import datetime
-
 import cv2
 
 
