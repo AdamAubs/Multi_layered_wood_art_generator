@@ -77,16 +77,16 @@ input:disabled {
 }
 
 .status-card {
-  width: min(900px, 92vw);
+  width: min(900px, 45vw);
   margin: 24px auto 0;
   text-align: left;
-  background: rgba(255, 255, 255, 0.2);
+  background: rgba(152, 169, 149, 0.2);
   border: 1px solid #d7d7d7;
   border-radius: 10px;
 }
 
 .error-text {
-  color: #b42318;
+  color: #e81a0c;
   font-weight: 600;
 }
 

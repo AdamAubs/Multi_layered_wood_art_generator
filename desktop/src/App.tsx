@@ -1,6 +1,7 @@
 import { useEffect, useState, useRef } from "react";
 import reactLogo from "./assets/react.svg";
 import { invoke } from "@tauri-apps/api/core";
+import { open } from "@tauri-apps/plugin-dialog";
 import "./App.css";
 
 type JobStatus =
@@ -49,6 +50,17 @@ function App() {
     if (isTerminal(latest.status) && pollRef.current !== null) {
       window.clearInterval(pollRef.current);
       pollRef.current = null;
+    }
+  }
+
+  async function browseForImage() {
+    const selected = await open({
+      title: "Select a PNG image you want to turn into separate layers",
+      multiple: false,
+      filters: [{ name: "PNG Image", extensions: ["png"] }],
+    });
+    if (typeof selected === "string") {
+      setImagePath(selected);
     }
   }
 
@@ -107,6 +119,10 @@ function App() {
               disabled={isRunning}
             />
           </label>
+
+          <button onClick={browseForImage} disabled={isRunning}>
+            Browse...
+          </button>
 
           <button onClick={startJob} disabled={isRunning}>
             {isRunning ? "Job running..." : "Start job"}
