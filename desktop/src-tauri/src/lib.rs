@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::fs;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
@@ -70,6 +71,26 @@ struct JobSnapshot {
     current_layer: Option<u32>,
     winner_history: Vec<LayerWinner>,
     final_dir: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct FinalArtifact {
+    name: String,
+    abs_path: String,
+    ext: String,
+    previewable: bool,
+    category: String,
+}
+
+fn artifact_category(ext: &str) -> (&'static str, bool) {
+    match ext {
+        "png" => ("image", true),
+        "dxf" => ("vector", false),
+        "md" => ("doc", false),
+        "json" => ("data", false),
+        "txt" => ("text", false),
+        _ => ("other", false),
+    }
 }
 
 // ─── Global single-job store ──────────────────────────────────────────────────
@@ -463,12 +484,14 @@ fn start_job(image_path: String) -> Result<JobSnapshot, String> {
 
                 } else if l.starts_with("Final fabrication package saved to") {
                     // Capture the output directory shown in the success message.
-                    let dir = l
+                    let raw_dir = l
                         .trim_start_matches("Final fabrication package saved to '")
                         .trim_end_matches("'.")
                         .trim_end_matches('\'')
                         .to_string();
-                    set_final_dir(&job_id, dir);
+
+                    let abs_dir = repo_root.join(raw_dir);
+                    set_final_dir(&job_id, abs_dir.to_string_lossy().to_string());
 
                 } else if !l.is_empty() {
                     // Show any other pipeline output as the live status message.
@@ -522,12 +545,82 @@ fn get_job_status() -> Result<JobSnapshot, String> {
     }
 }
 
+#[tauri::command]
+fn list_final_artifacts(final_dir: String) -> Result<Vec<FinalArtifact>, String> {
+    let dir = PathBuf::from(final_dir.trim());
+
+    if !dir.exists() {
+        return Err(format!("Final directory does not exist: {}", dir.display()));
+    }
+    if !dir.is_dir() {
+        return Err(format!("Path is not a directory: {}", dir.display()));
+    }
+
+    let mut out: Vec<FinalArtifact> = Vec::new();
+
+    let entries = fs::read_dir(&dir)
+        .map_err(|e| format!("Failed to read final directory: {e}"))?;
+
+    for entry in entries {
+        let entry = entry.map_err(|e| format!("Bad directory entry: {e}"))?;
+        let path = entry.path();
+        if !path.is_file() {
+            continue;
+        }
+
+        let ext = path
+            .extension()
+            .and_then(|s| s.to_str())
+            .unwrap_or("")
+            .to_ascii_lowercase();
+
+        if !matches!(ext.as_str(), "png" | "dxf" | "md" | "json" | "txt") {
+            continue;
+        }
+
+        let (category, previewable) = artifact_category(&ext);
+
+        let name = path
+            .file_name()
+            .and_then(|s| s.to_str())
+            .unwrap_or("")
+            .to_string();
+
+        let abs_path = path
+            .canonicalize()
+            .unwrap_or(path.clone())
+            .to_string_lossy()
+            .to_string();
+
+        out.push(FinalArtifact {
+            name,
+            abs_path,
+            ext,
+            previewable,
+            category: category.to_string(),
+        });
+    }
+
+    out.sort_by(|a, b| {
+        let a_png_layer = a.ext == "png" && a.name.starts_with("Layer_");
+        let b_png_layer = b.ext == "png" && b.name.starts_with("Layer_");
+
+        match (a_png_layer, b_png_layer) {
+            (true, false) => std::cmp::Ordering::Less,
+            (false, true) => std::cmp::Ordering::Greater,
+            _ => a.name.to_lowercase().cmp(&b.name.to_lowercase()),
+        }
+    });
+
+    Ok(out)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
-        .invoke_handler(tauri::generate_handler![start_job, get_job_status])
+        .invoke_handler(tauri::generate_handler![start_job, get_job_status, list_final_artifacts])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

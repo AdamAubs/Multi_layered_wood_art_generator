@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef } from "react";
 import reactLogo from "./assets/react.svg";
-import { invoke } from "@tauri-apps/api/core";
+import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import "./App.css";
 
@@ -25,6 +25,14 @@ type JobSnapshot = {
   final_dir: string | null;
 };
 
+type FinalArtifact = {
+  name: string;
+  abs_path: string;
+  ext: string;
+  previewable: boolean;
+  category: string;
+};
+
 function isRunningStatus(status: JobStatus) {
   return (
     status === "preprocessing" ||
@@ -43,6 +51,10 @@ function App() {
   const [uiError, setUiError] = useState("");
   const pollRef = useRef<number | null>(null);
 
+  const [artifacts, setArtifacts] = useState<FinalArtifact[]>([]);
+  const [artifactsError, setArtifactsError] = useState("");
+  const [isLoadingArtifacts, setIsLoadiningArtifacts] = useState(false);
+
   async function fetchStatus() {
     const latest = await invoke<JobSnapshot>("get_job_status");
     setJob(latest);
@@ -50,6 +62,23 @@ function App() {
     if (isTerminal(latest.status) && pollRef.current !== null) {
       window.clearInterval(pollRef.current);
       pollRef.current = null;
+    }
+  }
+
+  async function fetchFinalArtifacts(finalDir: string) {
+    setArtifactsError("");
+    setIsLoadiningArtifacts(true);
+
+    try {
+      const files = await invoke<FinalArtifact[]>("list_final_artifacts", {
+        finalDir,
+      });
+      setArtifacts(files);
+    } catch (e) {
+      setArtifacts([]);
+      setArtifactsError(String(e));
+    } finally {
+      setIsLoadiningArtifacts(false);
     }
   }
 
@@ -102,7 +131,23 @@ function App() {
     };
   }, []);
 
+  useEffect(() => {
+    if (job?.status === "complete" && job.final_dir) {
+      fetchFinalArtifacts(job.final_dir).catch((e) =>
+        setArtifactsError(String(e)),
+      );
+    }
+
+    if (job?.status !== "complete") {
+      setArtifacts([]);
+      setArtifactsError("");
+    }
+  }, [job?.status, job?.final_dir]);
+
   const isRunning = job ? isRunningStatus(job.status) : false;
+
+  const previewImages = artifacts.filter((a) => a.previewable);
+  const nonPreviewFiles = artifacts.filter((a) => !a.previewable);
 
   return (
     <main className="container">
@@ -178,6 +223,54 @@ function App() {
           </p>
         )}
       </section>
+
+      {job?.status === "complete" && (
+        <section className="preview-card">
+          <h2>Final Output Preview</h2>
+
+          {isLoadingArtifacts && <p>Loading final artifacts...</p>}
+
+          {artifactsError && (
+            <p className="error-text">
+              <strong>Preview Error:</strong> {artifactsError}
+            </p>
+          )}
+
+          {!isLoadingArtifacts && !artifactsError && (
+            <>
+              {previewImages.length > 0 ? (
+                <div className="preview-grid">
+                  {previewImages.map((file) => (
+                    <figure key={file.abs_path} className="preview-item">
+                      <img
+                        src={convertFileSrc(file.abs_path)}
+                        alt={file.name}
+                        loading="lazy"
+                      />
+                      <figcaption>{file.name}</figcaption>
+                    </figure>
+                  ))}
+                </div>
+              ) : (
+                <p>No PNG previews were found in the final directory.</p>
+              )}
+
+              {nonPreviewFiles.length > 0 && (
+                <div className="artifact-list">
+                  <h3>Other files</h3>
+                  <ul>
+                    {nonPreviewFiles.map((file) => (
+                      <li key={file.abs_path}>
+                        {file.name} ({file.ext})
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </>
+          )}
+        </section>
+      )}
     </main>
   );
 }
