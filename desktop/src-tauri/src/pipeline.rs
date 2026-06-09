@@ -8,7 +8,7 @@ use crate::state::{job_store, is_terminal, set_status, set_message, set_final_di
 use crate::types::{JobState, JobStatus};
 
 #[tauri::command]
-pub fn start_job(image_path: String) -> Result<crate::types::JobSnapshot, String> {
+pub fn start_job(image_path: String, stock_size_in: Option<String>) -> Result<crate::types::JobSnapshot, String> {
     let trimmed = image_path.trim().to_string();
 
     if trimmed.is_empty() {
@@ -87,11 +87,17 @@ pub fn start_job(image_path: String) -> Result<crate::types::JobSnapshot, String
             thread::spawn(move || crate::log_tail::tail_run_log(lp, lj));
         }
 
-        let mut child = match Command::new(&python_path)
-            .arg("-u")
+        let mut cmd = Command::new(&python_path);
+        cmd.arg("-u")
             .arg("pipeline.py")
             .arg("--image")
-            .arg(&trimmed)
+            .arg(&trimmed);
+
+        if let Some(ref size) = stock_size_in {
+            cmd.arg("--stock-size-in").arg(size);
+        }
+
+        let mut child = match cmd
             .current_dir(&repo_root)
             .stdout(Stdio::piped())
             .stderr(Stdio::inherit())

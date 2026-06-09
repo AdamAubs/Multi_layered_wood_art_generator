@@ -19,7 +19,10 @@ export function useJob() {
     }
   }
 
-  async function startJob(imagePath: string) {
+  async function startJob(
+    imagePath: string,
+    stockSizeIn: string | null = null,
+  ) {
     setUiError("");
 
     const trimmed = imagePath.trim();
@@ -31,6 +34,7 @@ export function useJob() {
     try {
       const started = await invoke<JobSnapshot>("start_job", {
         imagePath: trimmed,
+        stockSizeIn: stockSizeIn ?? null,
       });
       setJob(started);
 
