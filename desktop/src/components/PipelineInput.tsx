@@ -70,22 +70,24 @@ export function PipelineInput({
           </label>
         </div>
 
-        {isCustom && (
-          <label>
-            Custom size (W x H)
-            <input
-              value={customStock}
-              onChange={(e) => setCustomStock(e.currentTarget.value)}
-              placeholder="e.g. 10x16"
-              disabled={isDisabled}
-            />
-            {customIsInvalid && (
-              <span style={{ color: "red", fontSize: "0.8em" }}>
-                Format must be WxH (e.g. 12x20)
-              </span>
-            )}
-          </label>
-        )}
+        <div className="custom-size">
+          {isCustom && (
+            <label>
+              Custom size (W x H)
+              <input
+                value={customStock}
+                onChange={(e) => setCustomStock(e.currentTarget.value)}
+                placeholder="e.g. 10x16"
+                disabled={isDisabled}
+              />
+              {customIsInvalid && (
+                <span style={{ color: "red", fontSize: "0.8em" }}>
+                  Format must be WxH (e.g. 12x20)
+                </span>
+              )}
+            </label>
+          )}
+        </div>
 
         <button onClick={() => onStart(stockSizeValue)} disabled={!canStart}>
           {isDisabled ? "Job running..." : "Start job"}

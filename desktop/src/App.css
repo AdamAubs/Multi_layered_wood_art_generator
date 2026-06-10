@@ -47,8 +47,20 @@
   box-shadow: 0 2px 2px rgba(0, 0, 0, 0.2);
 }
 
+.stock-input-container select {
+  margin-left: 10px;
+}
+
+.custom-size {
+  margin-top: 10px;
+}
+
 h1 {
   text-align: center;
+}
+
+label {
+  margin-right: 10px;
 }
 
 input,
@@ -82,6 +94,7 @@ button:active {
 input,
 button {
   outline: none;
+  margin-left: 10px;
 }
 
 button:disabled,
