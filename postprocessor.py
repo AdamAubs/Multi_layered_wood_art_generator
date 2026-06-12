@@ -170,7 +170,7 @@ def parse_args():
     parser.add_argument(
         "--bridge-gap-px",
         type=int,
-        default=6,
+        default=30,
         help="Max pixel gap to bridge to support (conservative). Default: 6.",
     )
     parser.add_argument(
@@ -594,8 +594,6 @@ def _colorize_white_mask(mask_gray, rgb):
     bgr = (b, g, r)
     out[mask_gray == 255] = bgr
     return out
-
-
 
 # ---------------------------------------------------------------------------
 # Stress analysis: 2-D plane stress FEM
@@ -1356,100 +1354,100 @@ def print_final_summary(working_masks, working_colors, frame):
     print(f"\nFinal layer order (top -> bottom): {working_colors}")
 
 
-# def build_support_masks(working_masks, frame):
-#     """
-#     For each layer, build a support mask that includes the frame and all layers
-#     below it (assuming working_masks is ordered top -> bottom).
-#     """
-#     support_masks = [None] * len(working_masks)
-#     support = frame.copy()
-#     for idx in range(len(working_masks) - 1, -1, -1):
-#         support_masks[idx] = support.copy()
-#         support = cv2.bitwise_or(support, working_masks[idx])
-#     return support_masks
+def build_support_masks(working_masks, frame):
+    """
+    For each layer, build a support mask that includes the frame and all layers
+    below it (assuming working_masks is ordered top -> bottom).
+    """
+    support_masks = [None] * len(working_masks)
+    support = frame.copy()
+    for idx in range(len(working_masks) - 1, -1, -1):
+        support_masks[idx] = support.copy()
+        support = cv2.bitwise_or(support, working_masks[idx])
+    return support_masks
 
 
-# def bridge_islands_to_support(mask, support_mask, frame, gap_px, max_bridges, debug=False):
-#     """
-#     Add thin bridges from disconnected islands to the nearest support when the
-#     gap is within gap_px. Designed to be conservative.
-#     """
-#     if gap_px <= 0 or support_mask is None:
-#         return mask
+def bridge_islands_to_support(mask, support_mask, frame, gap_px, max_bridges, debug=False):
+    """
+    Add thin bridges from disconnected islands to the nearest support when the
+    gap is within gap_px. Designed to be conservative.
+    """
+    if gap_px <= 0 or support_mask is None:
+        return mask
 
-#     mask_bin = (mask > 0).astype(np.uint8) * 255
-#     support_bin = (support_mask > 0).astype(np.uint8) * 255
+    mask_bin = (mask > 0).astype(np.uint8) * 255
+    support_bin = (support_mask > 0).astype(np.uint8) * 255
 
-#     h, w = mask_bin.shape
-#     max_bridges = int(max_bridges)
-#     if max_bridges < 0:
-#         max_bridges = 0
+    h, w = mask_bin.shape
+    max_bridges = int(max_bridges)
+    if max_bridges < 0:
+        max_bridges = 0
 
-#     # Distance to support for all pixels (0 inside support).
-#     dist_to_support = cv2.distanceTransform(
-#         (support_bin == 0).astype(np.uint8), cv2.DIST_L2, 3
-#     )
+    # Distance to support for all pixels (0 inside support).
+    dist_to_support = cv2.distanceTransform(
+        (support_bin == 0).astype(np.uint8), cv2.DIST_L2, 3
+    )
 
-#     labels_count, labels = cv2.connectedComponents(mask_bin, connectivity=4)
-#     bridges_added = 0
-#     out_mask = mask_bin.copy()
-#     considered = 0
-#     bridged = 0
-#     bridged_distances = []
+    labels_count, labels = cv2.connectedComponents(mask_bin, connectivity=4)
+    bridges_added = 0
+    out_mask = mask_bin.copy()
+    considered = 0
+    bridged = 0
+    bridged_distances = []
 
-#     for comp in range(1, labels_count):
-#         coords = np.column_stack(np.where(labels == comp))
-#         if coords.size == 0:
-#             continue
-#         if np.any(support_bin[coords[:, 0], coords[:, 1]] > 0):
-#             continue
+    for comp in range(1, labels_count):
+        coords = np.column_stack(np.where(labels == comp))
+        if coords.size == 0:
+            continue
+        if np.any(support_bin[coords[:, 0], coords[:, 1]] > 0):
+            continue
 
-#         considered += 1
-#         dists = dist_to_support[coords[:, 0], coords[:, 1]]
-#         min_idx = int(np.argmin(dists))
-#         min_dist = float(dists[min_idx])
-#         if min_dist > gap_px:
-#             continue
+        considered += 1
+        dists = dist_to_support[coords[:, 0], coords[:, 1]]
+        min_idx = int(np.argmin(dists))
+        min_dist = float(dists[min_idx])
+        if min_dist > gap_px:
+            continue
 
-#         island_r, island_c = coords[min_idx]
-#         r0 = max(0, island_r - gap_px)
-#         r1 = min(h - 1, island_r + gap_px)
-#         c0 = max(0, island_c - gap_px)
-#         c1 = min(w - 1, island_c + gap_px)
-#         window = support_bin[r0:r1 + 1, c0:c1 + 1]
-#         support_coords = np.column_stack(np.where(window > 0))
-#         if support_coords.size == 0:
-#             continue
+        island_r, island_c = coords[min_idx]
+        r0 = max(0, island_r - gap_px)
+        r1 = min(h - 1, island_r + gap_px)
+        c0 = max(0, island_c - gap_px)
+        c1 = min(w - 1, island_c + gap_px)
+        window = support_bin[r0:r1 + 1, c0:c1 + 1]
+        support_coords = np.column_stack(np.where(window > 0))
+        if support_coords.size == 0:
+            continue
 
-#         support_coords[:, 0] += r0
-#         support_coords[:, 1] += c0
-#         dr = support_coords[:, 0] - island_r
-#         dc = support_coords[:, 1] - island_c
-#         nearest_idx = int(np.argmin(dr * dr + dc * dc))
-#         sup_r, sup_c = support_coords[nearest_idx]
+        support_coords[:, 0] += r0
+        support_coords[:, 1] += c0
+        dr = support_coords[:, 0] - island_r
+        dc = support_coords[:, 1] - island_c
+        nearest_idx = int(np.argmin(dr * dr + dc * dc))
+        sup_r, sup_c = support_coords[nearest_idx]
 
-#         cv2.line(out_mask, (int(island_c), int(island_r)), (int(sup_c), int(sup_r)), 255, 1)
-#         bridges_added += 1
-#         bridged += 1
-#         bridged_distances.append(min_dist)
-#         if max_bridges > 0 and bridges_added >= max_bridges:
-#             break
+        cv2.line(out_mask, (int(island_c), int(island_r)), (int(sup_c), int(sup_r)), 255, 1)
+        bridges_added += 1
+        bridged += 1
+        bridged_distances.append(min_dist)
+        if max_bridges > 0 and bridges_added >= max_bridges:
+            break
 
-#     out_mask = cv2.bitwise_and(out_mask, cv2.bitwise_not(frame))
-#     if debug:
-#         if bridged_distances:
-#             dist_min = min(bridged_distances)
-#             dist_max = max(bridged_distances)
-#             dist_med = float(np.median(bridged_distances))
-#         else:
-#             dist_min = dist_max = dist_med = 0.0
-#         print(
-#             "    debug: islands="
-#             f"{labels_count - 1}, considered={considered}, bridged={bridged}, "
-#             f"gap_px={gap_px}, dist_min={dist_min:.2f}, "
-#             f"dist_med={dist_med:.2f}, dist_max={dist_max:.2f}"
-#         )
-#     return out_mask
+    out_mask = cv2.bitwise_and(out_mask, cv2.bitwise_not(frame))
+    if debug:
+        if bridged_distances:
+            dist_min = min(bridged_distances)
+            dist_max = max(bridged_distances)
+            dist_med = float(np.median(bridged_distances))
+        else:
+            dist_min = dist_max = dist_med = 0.0
+        print(
+            "    debug: islands="
+            f"{labels_count - 1}, considered={considered}, bridged={bridged}, "
+            f"gap_px={gap_px}, dist_min={dist_min:.2f}, "
+            f"dist_med={dist_med:.2f}, dist_max={dist_max:.2f}"
+        )
+    return out_mask
 
 # ---------------------------------------------------------------------------
 # Main
@@ -1529,7 +1527,8 @@ def main():
                 added = int(np.count_nonzero(widened)) - int(np.count_nonzero(mask))
                 print(f"  {layer_name}: widened {added} thin pixels")
                 working_masks[i] = widened
-    
+
+    # TODO 
     #     print("\n--- Stress Analysis: widening weak members ---")
     #     print(f"  β = {args.stress_beta:.1f} MPa  |  "
     #             f"FEA size = {args.stress_fea_size}  |  "
@@ -1571,21 +1570,21 @@ def main():
 
     # print("\nStress analysis complete.")
 
-    # if args.bridge_support:
-    #     print("\n--- Bridging small gaps to support ---")
-    #     support_masks = build_support_masks(working_masks, frame)
-    #     for i, (mask, color_id) in enumerate(zip(working_masks, working_colors)):
-    #         layer_name = f"Layer_{i:02d}_Color_{color_id}"
-    #         print(f"  Bridging {layer_name} ...")
-    #         working_masks[i] = bridge_islands_to_support(
-    #             mask=mask,
-    #             support_mask=support_masks[i],
-    #             frame=frame,
-    #             gap_px=args.bridge_gap_px,
-    #             max_bridges=args.bridge_max_bridges,
-    #             debug=args.debug_bridge,
-    #         )
-
+    if args.bridge_support:
+        print("\n--- Bridging disconnected islands to support ---")
+        support_masks = build_support_masks(working_masks, frame)
+        for i, (mask, color_id) in enumerate(zip(working_masks, working_colors)):
+            layer_name = f"Layer_{i:02d}_Color_{color_id}"
+            print(f"  Bridging {layer_name} ...")
+            working_masks[i] = bridge_islands_to_support(
+                mask=mask,
+                support_mask=support_masks[i],
+                frame=frame,
+                gap_px=args.bridge_gap_px,
+                max_bridges=args.bridge_max_bridges,
+                debug=args.debug_bridge,
+            )
+        
     save_outputs(output_dir, working_masks, working_colors, frame)
 
     # Finalize: create fabrication-ready package (per-layer PNG + DXF + handoff.md)
