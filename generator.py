@@ -42,6 +42,12 @@ def parse_args():
         action="store_true",
         help="Append a YYYYMMDD_HHMMSS timestamp to the output directory.",
     )
+    parser.add_argument(
+        "--bridge-count",
+        type=int,
+        default=8,
+        help="Number of bridges per patch distributed angularly. Default: 4.",
+    )
     return parser.parse_args()
 
 
@@ -119,7 +125,7 @@ def prepare_thresholds(w, h):
     return omega_budget, delta_widening_px, gamma_hole_area
 
 
-def generate_layers(labels, n_colors):
+def generate_layers(labels, n_colors, bridge_count=4):
     h, w = labels.shape
     color_masks = build_color_masks(labels, n_colors)
     m_minus_1 = create_frame(h, w)
@@ -190,13 +196,15 @@ def generate_layers(labels, n_colors):
                     hypothetical_safe_zone[patch_pixels] = 255
                     remaining_patches.remove(nearest_patch_id)
                 elif (spent_budget + nearest_distance) <= omega_budget:
-                    spent_budget += nearest_distance
+                    spent_budget += nearest_distance  # charge once regardless of bridge count
+
                     connected_area += int(np.sum(patch_pixels))
 
-                    patch_dist_map = np.where(patch_pixels, dist_map, np.inf)
-                    min_y, min_x = np.unravel_index(
-                        np.argmin(patch_dist_map), patch_dist_map.shape
-                    )
+                    patch_ys, patch_xs = np.where(patch_pixels)
+                    centroid_y = float(np.mean(patch_ys))
+                    centroid_x = float(np.mean(patch_xs))
+                    angles = np.arctan2(patch_ys - centroid_y, patch_xs - centroid_x)
+                    patch_dists = dist_map[patch_ys, patch_xs]
 
                     safe_edge = cv2.morphologyEx(
                         hypothetical_safe_zone,
@@ -204,18 +212,59 @@ def generate_layers(labels, n_colors):
                         np.ones((3, 3), np.uint8),
                     )
                     edge_y, edge_x = np.where(safe_edge > 0)
-                    distances_sq = (edge_x - min_x) ** 2 + (edge_y - min_y) ** 2
-                    best_edge_idx = np.argmin(distances_sq)
-                    target_x = int(edge_x[best_edge_idx])
-                    target_y = int(edge_y[best_edge_idx])
 
-                    cv2.line(
-                        hypothetical_safe_zone,
-                        (int(min_x), int(min_y)),
-                        (target_x, target_y),
-                        255,
-                        1,
-                    )
+                    # Dynamic bridge count 
+                    bbox_w = stats[nearest_patch_id, cv2.CC_STAT_WIDTH]
+                    bbox_h = stats[nearest_patch_id, cv2.CC_STAT_HEIGHT]
+                    bbox_diag = math.sqrt(bbox_w ** 2 + bbox_h ** 2)
+                    img_diag = math.sqrt(w ** 2 + h ** 2)
+
+                    # Base count: 1 bridge per 3% of image diagonal
+                    size_bridges = bbox_diag / (0.03 * img_diag)
+
+                    # Compactness penalty: ring shapes (low compactness) need more bridges
+                    patch_area = int(np.sum(patch_pixels))
+                    patch_perimeter = float(np.sum(
+                        cv2.morphologyEx(
+                            patch_pixels.astype(np.uint8) * 255,
+                            cv2.MORPH_GRADIENT,
+                            np.ones((3, 3), np.uint8),
+                        ) > 0
+                    ))
+                    if patch_perimeter > 0:
+                        compactness = (4 * math.pi * patch_area) / (patch_perimeter ** 2)
+                        # compactness near 1 = solid blob, near 0 = thin ring
+                        # boost bridges for low-compactness shapes (max 2x)
+                        compactness_factor = 1.0 + max(0.0, 1.0 - compactness)
+                    else:
+                        compactness_factor = 1.0
+
+                    dynamic_bridges = max(1, min(bridge_count, round(size_bridges * compactness_factor)))
+
+                    sector_size = 2 * math.pi / dynamic_bridges
+                    for i in range(dynamic_bridges):
+                        sector_min = -math.pi + i * sector_size
+                        sector_max = sector_min + sector_size
+                        in_sector = (angles >= sector_min) & (angles < sector_max)
+                        if not np.any(in_sector):
+                            continue
+                        sector_dists = np.where(in_sector, patch_dists, np.inf)
+                        best_idx = int(np.argmin(sector_dists))
+                        start_x = int(patch_xs[best_idx])
+                        start_y = int(patch_ys[best_idx])
+
+                        distances_sq = (edge_x - start_x) ** 2 + (edge_y - start_y) ** 2
+                        best_edge_idx = int(np.argmin(distances_sq))
+                        target_x = int(edge_x[best_edge_idx])
+                        target_y = int(edge_y[best_edge_idx])
+
+                        cv2.line(
+                            hypothetical_safe_zone,
+                            (start_x, start_y),
+                            (target_x, target_y),
+                            255,
+                            1,
+                        )
 
                     hypothetical_safe_zone[patch_pixels] = 255
                     remaining_patches.remove(nearest_patch_id)
@@ -354,7 +403,7 @@ def main():
         winning_safe_zone_history,
         frame,
         _,
-    ) = generate_layers(labels, n_colors)
+    ) = generate_layers(labels, n_colors, bridge_count=args.bridge_count)
     save_outputs(output_dir, global_safe_zone, layer_order, winning_safe_zone_history, frame)
 
     print("\n--------------------------")
