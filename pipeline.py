@@ -95,6 +95,12 @@ def parse_args():
         help="Optional stock sheet size in inches as WxH (e.g. 12x20). When provided a combined layout DXF will be created and added to the final package.",
     )
     parser.add_argument(
+        "--bridge-count",
+        type=int,
+        default=5,
+        help="Number of support bridges per patch. Default: 5. Higher values may distort fine details."
+    )
+    parser.add_argument(
         "--dxf-frame-margin-mm",
         type=float,
         default=15.0,
@@ -276,6 +282,9 @@ def main():
         "--out-dir",
         generator_output,
     ]
+
+    if args.bridge_count is not None:
+        generator_cmd.extend(["--bridge-count", str(args.bridge_count)])
 
     if run_step(generator_cmd, "Generator", run_log) != 0:
         return 1

@@ -22,6 +22,7 @@ export function useJob() {
   async function startJob(
     imagePath: string,
     stockSizeIn: string | null = null,
+    bridgeCountIn: number | null = null,
   ) {
     setUiError("");
 
@@ -35,6 +36,7 @@ export function useJob() {
       const started = await invoke<JobSnapshot>("start_job", {
         imagePath: trimmed,
         stockSizeIn: stockSizeIn ?? null,
+        bridgeCountIn: bridgeCountIn ?? null,
       });
       setJob(started);
 
