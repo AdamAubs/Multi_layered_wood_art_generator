@@ -22,12 +22,18 @@ function App() {
         imagePath={imagePath}
         onPathChange={setImagePath}
         onBrowse={browseForImage}
-        onStart={(stockSizeIn, bridgeCountIn, mergeVisibleFractionIn) =>
+        onStart={(
+          stockSizeIn,
+          bridgeCountIn,
+          mergeVisibleFractionIn,
+          omegaBudgetFactorIn,
+        ) =>
           startJob(
             imagePath,
             stockSizeIn,
             bridgeCountIn,
             mergeVisibleFractionIn,
+            omegaBudgetFactorIn,
           )
         }
         isDisabled={isRunning}

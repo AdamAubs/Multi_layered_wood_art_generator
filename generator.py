@@ -48,6 +48,12 @@ def parse_args():
         default=8,
         help="Number of bridges per patch distributed angularly. Default: 4.",
     )
+    parser.add_argument(
+        "--omega-budget-factor",
+        type=float,
+        default=0.01,
+        help="Distance budget factor used in omega = factor * image_diagonal (0 < value < 1).",
+    )
     return parser.parse_args()
 
 
@@ -117,15 +123,15 @@ def create_frame(h, w):
     return m_minus_1
 
 
-def prepare_thresholds(w, h):
+def prepare_thresholds(w, h, omega_budget_factor=0.01):
     diagonal = math.sqrt(w ** 2 + h ** 2)
-    omega_budget = 0.03 * diagonal
+    omega_budget = omega_budget_factor * diagonal
     delta_widening_px = max(1, int(0.002 * diagonal))
     gamma_hole_area = 0.0001 * (w * h)
     return omega_budget, delta_widening_px, gamma_hole_area
 
 
-def generate_layers(labels, n_colors, bridge_count=4):
+def generate_layers(labels, n_colors, bridge_count=4, omega_budget_factor=0.01):
     h, w = labels.shape
     color_masks = build_color_masks(labels, n_colors)
     m_minus_1 = create_frame(h, w)
@@ -134,7 +140,7 @@ def generate_layers(labels, n_colors, bridge_count=4):
     for k in range(n_colors):
         color_masks[k] = cv2.bitwise_and(color_masks[k], cv2.bitwise_not(m_minus_1))
 
-    omega_budget, delta_widening_px, gamma_hole_area = prepare_thresholds(w, h)
+    omega_budget, delta_widening_px, gamma_hole_area = prepare_thresholds(w, h, omega_budget_factor=omega_budget_factor)
     print(f"Distance Budget  (omega):  {omega_budget:.2f} px")
     print(f"Widening Radius  (delta):  {delta_widening_px} px")
     print(f"Tiny Hole Limit  (gamma):  {gamma_hole_area:.2f} px²")
@@ -395,15 +401,25 @@ def main():
     except FileNotFoundError as exc:
         print(exc)
         return 1
-
+    
     output_dir = resolve_output_dir(args, run_name)
-    (
-        global_safe_zone,
-        layer_order,
-        winning_safe_zone_history,
-        frame,
-        _,
-    ) = generate_layers(labels, n_colors, bridge_count=args.bridge_count)
+    if args.omega_budget_factor:
+        if not (0.0 < args.omega_budget_factor < 1.0):
+            print("Error: --omega-budget-factor must be between 0 and 1 (exclusive).")
+            return 1
+
+        (
+            global_safe_zone,
+            layer_order,
+            winning_safe_zone_history,
+            frame,
+            _,
+        ) = generate_layers(
+            labels,
+            n_colors,
+            bridge_count=args.bridge_count,
+            omega_budget_factor=args.omega_budget_factor,
+        )
     save_outputs(output_dir, global_safe_zone, layer_order, winning_safe_zone_history, frame)
 
     print("\n--------------------------")

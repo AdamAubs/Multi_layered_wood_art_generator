@@ -124,6 +124,12 @@ def parse_args():
         default=None,
         help="Postprocessor merge threshold as fraction of image pixels (0 < value < 1).",
     )
+    parser.add_argument(
+        "--omega-budget-factor",
+        type=float,
+        default=None,
+        help="Generator omega factor used in omega = factor * image_diagonal (0 < value < 1).",
+    )
     return parser.parse_args()
 
 
@@ -291,6 +297,10 @@ def main():
 
     if args.bridge_count is not None:
         generator_cmd.extend(["--bridge-count", str(args.bridge_count)])
+    
+    if args.omega_budget_factor is not None:
+        generator_cmd.extend(["--omega-budget-factor", str(args.omega_budget_factor)])
+
 
     if run_step(generator_cmd, "Generator", run_log) != 0:
         return 1

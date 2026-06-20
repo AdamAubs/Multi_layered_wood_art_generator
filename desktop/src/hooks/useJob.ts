@@ -24,6 +24,7 @@ export function useJob() {
     stockSizeIn: string | null = null,
     bridgeCountIn: number | null = null,
     mergeVisibleFractionIn: number | null = null,
+    omegaBudgetFactorIn: number | null = null,
   ) {
     setUiError("");
 
@@ -39,6 +40,7 @@ export function useJob() {
         stockSizeIn: stockSizeIn ?? null,
         bridgeCountIn: bridgeCountIn ?? null,
         mergeVisibleFraction: mergeVisibleFractionIn ?? null,
+        omegaBudgetFactor: omegaBudgetFactorIn ?? null,
       });
       setJob(started);
 

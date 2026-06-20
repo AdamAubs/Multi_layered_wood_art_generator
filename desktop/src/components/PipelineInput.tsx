@@ -7,6 +7,7 @@ const BRIDGE_PRESETS = ["3", "5", "8", "10", "12"];
 const BRIDGE_COUNT_REGEX = /^\d+$/; // positive integer only
 
 const MERGE_PRESETS = ["0.01", "0.02", "0.03", "0.05", "0.1"];
+const OMEGA_PRESETS = ["0.008", "0.01", "0.012", "0.02"];
 
 const FRACTION_REGEX = /^(0?\.\d+)$/; // simple: 0.xx
 
@@ -18,6 +19,7 @@ interface PipelineInputProps {
     stockSizeIn: string | null,
     bridgeCountIn: number | null,
     mergeVisibleFractionIn: number | null,
+    omegaBudgetFactorIn: number | null,
   ) => void;
   isDisabled: boolean;
 }
@@ -37,6 +39,9 @@ export function PipelineInput({
 
   const [mergePreset, setMergePreset] = useState<string>("0.03");
   const [customMerge, setCustomMerge] = useState<string>("");
+
+  const [omegaPreset, setOmegaPreset] = useState<string>("0.01");
+  const [customOmega, setCustomOmega] = useState<string>("");
 
   const isCustom = stockPreset === "other";
   const stockSizeValue = isCustom
@@ -69,6 +74,16 @@ export function PipelineInput({
     customMerge.length > 0 &&
     (!FRACTION_REGEX.test(customMerge) ||
       !(parseFloat(customMerge) > 0 && parseFloat(customMerge) < 1));
+
+  const isOmegaCustom = omegaPreset === "other";
+  const omegaRaw = isOmegaCustom ? customOmega : omegaPreset;
+  const omegaBudgetFactorValue =
+    omegaRaw.length > 0 ? parseFloat(omegaRaw) : null;
+  const omegaCustomIsInvalid =
+    isOmegaCustom &&
+    customOmega.length > 0 &&
+    (!FRACTION_REGEX.test(customOmega) ||
+      !(parseFloat(customOmega) > 0 && parseFloat(customOmega) < 1));
 
   const canStart =
     !isDisabled &&
@@ -199,6 +214,41 @@ export function PipelineInput({
               </label>
             )}
           </div>
+
+          <div className="custom-bridge">
+            <label>
+              Omega budget factor
+              <select
+                value={omegaPreset}
+                onChange={(e) => setOmegaPreset(e.currentTarget.value)}
+                disabled={isDisabled}
+              >
+                {OMEGA_PRESETS.map((p) => (
+                  <option key={p} value={p}>
+                    {p}
+                  </option>
+                ))}
+                <option value="other">Other...</option>
+              </select>
+            </label>
+
+            {isOmegaCustom && (
+              <label>
+                Custom omega factor
+                <input
+                  value={customOmega}
+                  onChange={(e) => setCustomOmega(e.currentTarget.value)}
+                  placeholder="e.g. 0.01"
+                  disabled={isDisabled}
+                />
+                {omegaCustomIsInvalid && (
+                  <span style={{ color: "red", fontSize: "0.8em" }}>
+                    Must be a decimal between 0 and 1 (e.g. 0.01)
+                  </span>
+                )}
+              </label>
+            )}
+          </div>
         </div>
 
         {bridgeWarning && (
@@ -212,7 +262,12 @@ export function PipelineInput({
 
         <button
           onClick={() =>
-            onStart(stockSizeValue, bridgeCountValue, mergeVisibleFractionValue)
+            onStart(
+              stockSizeValue,
+              bridgeCountValue,
+              mergeVisibleFractionValue,
+              omegaBudgetFactorValue,
+            )
           }
           disabled={!canStart}
         >
