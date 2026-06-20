@@ -118,6 +118,12 @@ def parse_args():
         default=10.0,
         help="Inset in mm from each outer frame corner to the hole center.",
     )
+    parser.add_argument(
+        "--merge-visible-fraction",
+        type=float,
+        default=None,
+        help="Postprocessor merge threshold as fraction of image pixels (0 < value < 1).",
+    )
     return parser.parse_args()
 
 
@@ -320,6 +326,11 @@ def main():
             args.stock_size_in,
             "--layout-gap-mm",
             "5.0",
+        ])
+    
+    if args.merge_visible_fraction is not None:
+        postprocessor_cmd.extend([
+            "--merge-visible-fraction", str(args.merge_visible_fraction)
         ])
 
     if run_step(postprocessor_cmd, "Postprocessor", run_log) != 0:

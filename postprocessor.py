@@ -204,7 +204,12 @@ def parse_args():
         help="Target width in px after widening thin members. "
             "Defaults to --thin-min-width if not set.",
     )
-
+    parser.add_argument(
+        "--merge-visible-fraction",
+        type=float,
+        default=0.01,
+        help="Merge layers whocse visible area is below this fraction of total image pixels (0 < value < 1).",
+    )
     parser.add_argument(
         "--finalize",
         action="store_true",
@@ -1494,11 +1499,20 @@ def main():
 
     _, visible_areas = compute_visible_regions(individual_masks, frame)
     total_pixels = w * h
-    epsilon = 0.01 * total_pixels
+
+    if args.merge_visible_fraction:
+        if not (0.0 < args.merge_visible_fraction < 1.0):
+            print("Error: --merge-visible-fraction must be between 0 and 1 (exclusive).")
+            return 1
+        epsilon = args.merge_visible_fraction * total_pixels
+    else:
+        epsilon = 0.01 * total_pixels
 
     print(
-        f"\nVisible region areas (epsilon threshold = {epsilon:.0f} px = 1% of image):"
+        f"\nVisible region areas (epsilon threshold = {epsilon:.0f} px = "
+        f"{args.merge_visible_fraction * 100:.2f}% of image):"
     )
+
     for i in range(n_layers):
         pct = 100 * visible_areas[i] / total_pixels
         flag = " <- merge candidate" if visible_areas[i] < epsilon else ""

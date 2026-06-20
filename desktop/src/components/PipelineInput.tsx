@@ -6,11 +6,19 @@ const STOCK_SIZE_REGEX = /^\d+(\.\d+)?x\d+(\.\d+)?$/;
 const BRIDGE_PRESETS = ["3", "5", "8", "10", "12"];
 const BRIDGE_COUNT_REGEX = /^\d+$/; // positive integer only
 
+const MERGE_PRESETS = ["0.01", "0.02", "0.03", "0.05", "0.1"];
+
+const FRACTION_REGEX = /^(0?\.\d+)$/; // simple: 0.xx
+
 interface PipelineInputProps {
   imagePath: string;
   onPathChange: (path: string) => void;
   onBrowse: () => void;
-  onStart: (stockSizeIn: string | null, bridgeCountIn: number | null) => void;
+  onStart: (
+    stockSizeIn: string | null,
+    bridgeCountIn: number | null,
+    mergeVisibleFractionIn: number | null,
+  ) => void;
   isDisabled: boolean;
 }
 
@@ -27,6 +35,18 @@ export function PipelineInput({
   const [bridgePreset, setBridgePreset] = useState<string>("5");
   const [customBridge, setCustomBridge] = useState<string>("");
 
+  const [mergePreset, setMergePreset] = useState<string>("0.03");
+  const [customMerge, setCustomMerge] = useState<string>("");
+
+  const isCustom = stockPreset === "other";
+  const stockSizeValue = isCustom
+    ? customStock
+    : stockPreset === "none"
+      ? null
+      : stockPreset;
+  const customIsInvalid =
+    isCustom && customStock.length > 0 && !STOCK_SIZE_REGEX.test(customStock);
+
   const isBridgeCustom = bridgePreset === "other";
   const bridgeCountValue = isBridgeCustom
     ? customBridge.length > 0
@@ -38,22 +58,24 @@ export function PipelineInput({
     isBridgeCustom &&
     customBridge.length > 0 &&
     !BRIDGE_COUNT_REGEX.test(customBridge);
-
   const bridgeWarning = bridgeCountValue !== null && bridgeCountValue > 10;
 
-  const isCustom = stockPreset === "other";
-  const stockSizeValue = isCustom
-    ? customStock
-    : stockPreset === "none"
-      ? null
-      : stockPreset;
-  const customIsInvalid =
-    isCustom && customStock.length > 0 && !STOCK_SIZE_REGEX.test(customStock);
+  const isMergeCustom = mergePreset === "other";
+  const mergeRaw = isMergeCustom ? customMerge : mergePreset;
+  const mergeVisibleFractionValue =
+    mergeRaw.length > 0 ? parseFloat(mergeRaw) : null;
+  const mergeCustomIsInvalid =
+    isMergeCustom &&
+    customMerge.length > 0 &&
+    (!FRACTION_REGEX.test(customMerge) ||
+      !(parseFloat(customMerge) > 0 && parseFloat(customMerge) < 1));
+
   const canStart =
     !isDisabled &&
     imagePath.trim().length > 0 &&
     !(isCustom && (customStock.length === 0 || customIsInvalid)) &&
-    !(isBridgeCustom && (customBridge.length === 0 || bridgeCustomIsInvalid));
+    !(isBridgeCustom && (customBridge.length === 0 || bridgeCustomIsInvalid)) &&
+    !(isMergeCustom && (customMerge.length === 0 || mergeCustomIsInvalid));
 
   return (
     <div className="start-container">
@@ -142,6 +164,41 @@ export function PipelineInput({
               </label>
             )}
           </div>
+
+          <div className="custom-bridge">
+            <label>
+              Merge visible fraction
+              <select
+                value={mergePreset}
+                onChange={(e) => setMergePreset(e.currentTarget.value)}
+                disabled={isDisabled}
+              >
+                {MERGE_PRESETS.map((p) => (
+                  <option key={p} value={p}>
+                    {p}
+                  </option>
+                ))}
+                <option value="other">Other...</option>
+              </select>
+            </label>
+
+            {isMergeCustom && (
+              <label>
+                Custom merge fraction
+                <input
+                  value={customMerge}
+                  onChange={(e) => setCustomMerge(e.currentTarget.value)}
+                  placeholder="e.g. 0.03"
+                  disabled={isDisabled}
+                />
+                {mergeCustomIsInvalid && (
+                  <span style={{ color: "red", fontSize: "0.8em" }}>
+                    Must be a decimal between 0 and 1 (e.g. 0.03)
+                  </span>
+                )}
+              </label>
+            )}
+          </div>
         </div>
 
         {bridgeWarning && (
@@ -154,7 +211,9 @@ export function PipelineInput({
         )}
 
         <button
-          onClick={() => onStart(stockSizeValue, bridgeCountValue)}
+          onClick={() =>
+            onStart(stockSizeValue, bridgeCountValue, mergeVisibleFractionValue)
+          }
           disabled={!canStart}
         >
           {isDisabled ? "Job running..." : "Start job"}

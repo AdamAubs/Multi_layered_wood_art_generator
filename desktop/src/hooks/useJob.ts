@@ -23,6 +23,7 @@ export function useJob() {
     imagePath: string,
     stockSizeIn: string | null = null,
     bridgeCountIn: number | null = null,
+    mergeVisibleFractionIn: number | null = null,
   ) {
     setUiError("");
 
@@ -37,6 +38,7 @@ export function useJob() {
         imagePath: trimmed,
         stockSizeIn: stockSizeIn ?? null,
         bridgeCountIn: bridgeCountIn ?? null,
+        mergeVisibleFraction: mergeVisibleFractionIn ?? null,
       });
       setJob(started);
 

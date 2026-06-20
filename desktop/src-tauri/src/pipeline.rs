@@ -8,7 +8,7 @@ use crate::state::{job_store, is_terminal, set_status, set_message, set_final_di
 use crate::types::{JobState, JobStatus};
 
 #[tauri::command]
-pub fn start_job(image_path: String, stock_size_in: Option<String>, bridge_count: Option<u32>) -> Result<crate::types::JobSnapshot, String> {
+pub fn start_job(image_path: String, stock_size_in: Option<String>, bridge_count: Option<u32>, merge_visible_fraction: Option<f64>) -> Result<crate::types::JobSnapshot, String> {
     let trimmed = image_path.trim().to_string();
 
     if trimmed.is_empty() {
@@ -99,6 +99,10 @@ pub fn start_job(image_path: String, stock_size_in: Option<String>, bridge_count
 
         if let Some(bc) = bridge_count {
             cmd.arg("--bridge-count").arg(bc.to_string());
+        }
+
+        if let Some(v) = merge_visible_fraction {
+            cmd.arg("--merge-visible-fraction").arg(v.to_string());
         }
 
         let mut child = match cmd
