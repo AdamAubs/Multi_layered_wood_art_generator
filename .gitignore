@@ -9,6 +9,7 @@ __pycache__/
 preprocessor-2.py
 raster-to-vector.py
 
+images/
 image_generator_tests/
 image_postprocessed_tests/
 image_gen_prompts/
