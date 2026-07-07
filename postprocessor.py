@@ -600,6 +600,34 @@ def _colorize_white_mask(mask_gray, rgb):
     out[mask_gray == 255] = bgr
     return out
 
+def _colorize_mask_rgba(mask_gray, rgb):
+    """Return a BGRA image whose alpha channel comes from the cumulative mask.
+
+    - mask_gray: uint8 single-channel mask
+    - rgb: [R, G, B]
+    """
+    mask_array = np.asarray(mask_gray)
+    if mask_array.ndim != 2:
+        raise ValueError(f"Expected a single-channel mask, got shape {mask_array.shape}")
+
+    rgb_array = np.asarray(rgb, dtype=np.uint8).reshape(-1)
+    if rgb_array.size != 3:
+        raise ValueError(f"Expected an RGB triplet, got {rgb}")
+
+    alpha_mask = np.where(mask_array > 0, 255, 0).astype(np.uint8)
+
+    red = int(rgb_array[0])
+    green = int(rgb_array[1])
+    blue = int(rgb_array[2])
+
+    height, width = mask_array.shape
+    bgra = np.zeros((height, width, 4), dtype=np.uint8)
+    bgra[..., 0] = blue
+    bgra[..., 1] = green
+    bgra[..., 2] = red
+    bgra[..., 3] = alpha_mask
+    return bgra
+
 # ---------------------------------------------------------------------------
 # Stress analysis: 2-D plane stress FEM
 # ---------------------------------------------------------------------------
@@ -1709,12 +1737,25 @@ def main():
 
         # Colorize final layer PNGs by painting only white mask pixels.
         # This is done after DXF conversion so vector export still traces binary masks.
+        # for layer in final_layer_pngs:
+        #     mask_gray = cv2.imread(layer["path"], cv2.IMREAD_GRAYSCALE)
+        #     if mask_gray is None:
+        #         continue
+        #     colorized = _colorize_white_mask(mask_gray, layer["rgb"])
+        #     cv2.imwrite(layer["path"], colorized)
+
+        # Rewrite each final layer PNG as transparent BGRA after DXF export.
+        # The cumulative fabrication mask stays identical; only the artificial
+        # opaque preview background is removed.
         for layer in final_layer_pngs:
             mask_gray = cv2.imread(layer["path"], cv2.IMREAD_GRAYSCALE)
             if mask_gray is None:
+                print(f"Warning: Could not reload final mask for RGBA colorization: {layer['path']}")
                 continue
-            colorized = _colorize_white_mask(mask_gray, layer["rgb"])
-            cv2.imwrite(layer["path"], colorized)
+
+            colorized = _colorize_mask_rgba(mask_gray, layer["rgb"])
+            if not cv2.imwrite(layer["path"], colorized):
+                print(f"Warning: Could not write transparent layer PNG: {layer['path']}")
 
         layout_stock_size = args.stock_size_in
         layout_gap_mm = args.layout_gap_mm

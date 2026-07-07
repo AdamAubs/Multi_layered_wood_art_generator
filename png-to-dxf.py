@@ -194,13 +194,38 @@ def write_dxf(
 
     doc.saveas(out_path)
 
+def load_mask_image(png_path):
+    img = cv2.imread(png_path, cv2.IMREAD_UNCHANGED)
+    if img is None:
+        raise FileNotFoundError(f"Could not read: {png_path}")
+
+    if img.ndim == 2:
+        return img
+
+    if img.ndim != 3:
+        raise ValueError(f"Unsupported image shape for '{png_path}': {img.shape}")
+
+    channels = img.shape[2]
+    if channels == 4:
+        return img[:, :, 3]
+
+    if channels == 3:
+        return cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+
+    if channels == 1:
+        return img[:, :, 0]
+
+    raise ValueError(
+        f"Unsupported channel count for '{png_path}': expected 1, 3, or 4 channels, got shape {img.shape}"
+    )
 
 def main():
     args = parse_args()
 
-    img = cv2.imread(args.png, cv2.IMREAD_GRAYSCALE)
-    if img is None:
-        raise FileNotFoundError(f"Could not read: {args.png}")
+    # img = cv2.imread(args.png, cv2.IMREAD_GRAYSCALE)
+    # if img is None:
+    #     raise FileNotFoundError(f"Could not read: {args.png}")
+    img = load_mask_image(args.png)
 
     h, w = img.shape
 
