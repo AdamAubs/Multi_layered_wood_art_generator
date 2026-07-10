@@ -211,6 +211,18 @@ def parse_args():
         help="Merge layers whocse visible area is below this fraction of total image pixels (0 < value < 1).",
     )
     parser.add_argument(
+        "--generate-composite-preview",
+        action="store_true",
+        default=False,
+        help="Render assembled composite preview images after finalization succeeds."
+    )
+    parser.add_argument(
+        "--generate-showcase-preview",
+        action="store_true",
+        default=False,
+        help="Render digital-asset showcase previews in previews/showcase after finalization succeeds."
+    )
+    parser.add_argument(
         "--finalize",
         action="store_true",
         help="Create a fabrication-ready package (PNG + per-layer DXF + handoff.md).",
@@ -1914,8 +1926,49 @@ def main():
         handoff_path = os.path.join(final_dir, "handoff.md")
         with open(handoff_path, "w", encoding="utf-8") as h:
             h.write("".join(lines))
+        
+        preview_result = None
+        if args.generate_composite_preview:
+            try:
+                from preview_tools.layer_composite import render_composite_previews
+
+                preview_result = render_composite_previews(
+                    final_dir=final_dir,
+                    force=True,
+                )
+            except Exception as exc:
+                print(
+                    "WARNING: Fabrication package completed successfully, "
+                    f"but composite preview generation failed: {exc}"
+                )
+                return 1
+        
+        showcase_result = None
+        if args.generate_showcase_previews:
+            try:
+                from preview_tools.layer_showcase import render_showcase_previews
+
+                showcase_result = render_showcase_previews(
+                    final_dir=final_dir;
+                    force=True,
+                )
+            except Exception as exc:
+                print(
+                    "WARNING: Fabrication package completed successfully, "
+                    f"but showcase preview generation failed: {exc}"
+                )
+                return 1
+        
+        if showcase_result is not None:
+            print(f"Showcase fan preview wrriten to: {showcase_result['fan_path']}")
+            print(f"Showcase fan neutral preview written to: {showcase_result['fan_bg_path']}")
+            print(f"Showcase compare preview written to: {showcase_result['compare_path']}")
+            print(f"Showcase compare netural preview written to: {showcase_result['compare_bg_path']}")
 
         print(f"Final fabrication package written to: {final_dir}")
+        if preview_result is not None:
+            print(f"Transparent composite preview written to: {preview_result['transparent_path']}")
+            print(f"Neutral-background composite preview written to: {preview_result['background_path']}")
 
     if args.export_dxf:
         try:

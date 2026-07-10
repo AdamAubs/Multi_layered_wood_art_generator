@@ -95,6 +95,18 @@ def parse_args():
         help="Optional stock sheet size in inches as WxH (e.g. 12x20). When provided a combined layout DXF will be created and added to the final package.",
     )
     parser.add_argument(
+        "--generate-composite-preview",
+        action="store_true",
+        default=False,
+        help="Render assembled composite preview images after finalization succeeds.",
+    )
+    parser.add_argument(
+        "--generate-showcase-previews",
+        action="store_true",
+        default=False,
+        help="Render showcase-style digital asset previews after finalization succeeds."
+    )
+    parser.add_argument(
         "--bridge-count",
         type=int,
         default=5,
@@ -342,6 +354,12 @@ def main():
         postprocessor_cmd.extend([
             "--merge-visible-fraction", str(args.merge_visible_fraction)
         ])
+    
+    if args.generate_composite_preview:
+        postprocessor_cmd.append("--generate-composite-preview")
+
+    if args.generate_showcase_previews:
+        postprocessor_cmd.append("--generate-showcase-previews")
 
     if run_step(postprocessor_cmd, "Postprocessor", run_log) != 0:
         return 1
