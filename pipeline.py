@@ -101,7 +101,7 @@ def parse_args():
         help="Render assembled composite preview images after finalization succeeds.",
     )
     parser.add_argument(
-        "--generate-showcase-previews",
+        "--generate-showcase-preview",
         action="store_true",
         default=False,
         help="Render showcase-style digital asset previews after finalization succeeds."
@@ -354,12 +354,9 @@ def main():
         postprocessor_cmd.extend([
             "--merge-visible-fraction", str(args.merge_visible_fraction)
         ])
-    
-    if args.generate_composite_preview:
-        postprocessor_cmd.append("--generate-composite-preview")
 
-    if args.generate_showcase_previews:
-        postprocessor_cmd.append("--generate-showcase-previews")
+    postprocessor_cmd.append("--generate-composite-preview")
+    postprocessor_cmd.append("--generate-showcase-preview")
 
     if run_step(postprocessor_cmd, "Postprocessor", run_log) != 0:
         return 1

@@ -1927,8 +1927,17 @@ def main():
         with open(handoff_path, "w", encoding="utf-8") as h:
             h.write("".join(lines))
         
+        generate_composite = bool(args.generate_composite_preview)
+        # Composite implies showcase so the final package always has both sets.
+        generate_showcase = bool(args.generate_showcase_preview or args.generate_composite_preview)
+
+        print(
+            f"Preview generation flags: composite={generate_composite}, "
+            f"showcase={generate_showcase}"
+        )
+
         preview_result = None
-        if args.generate_composite_preview:
+        if generate_composite:
             try:
                 from preview_tools.layer_composite import render_composite_previews
 
@@ -1942,14 +1951,14 @@ def main():
                     f"but composite preview generation failed: {exc}"
                 )
                 return 1
-        
+
         showcase_result = None
-        if args.generate_showcase_previews:
+        if generate_showcase:
             try:
                 from preview_tools.layer_showcase import render_showcase_previews
 
                 showcase_result = render_showcase_previews(
-                    final_dir=final_dir;
+                    final_dir=final_dir,
                     force=True,
                 )
             except Exception as exc:
