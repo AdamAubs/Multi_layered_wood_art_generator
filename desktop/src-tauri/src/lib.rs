@@ -5,6 +5,7 @@ mod log_tail;
 mod artifacts;
 mod pipeline;
 mod template_store;
+mod library_types;
 
 pub use types::{JobStatus, JobSnapshot, PaletteColor, LayerWinner, FinalArtifact, JobState};
 pub use artifacts::list_final_artifacts;
