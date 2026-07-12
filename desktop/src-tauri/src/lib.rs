@@ -6,14 +6,20 @@ mod artifacts;
 mod pipeline;
 mod template_store;
 mod library_types;
+mod library_store;
 
 pub use types::{JobStatus, JobSnapshot, PaletteColor, LayerWinner, FinalArtifact, JobState};
 pub use artifacts::list_final_artifacts;
 pub use pipeline::{start_job, get_job_status};
 pub use template_store::{list_templates, save_template, delete_template};
+pub use library_store::ensure_library_initialized;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    if let Err(e) = library_store::initialize_library() {
+        eprintln!("Library initialization warning: {e}");
+    }
+
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
@@ -24,6 +30,7 @@ pub fn run() {
             list_templates,
             save_template,
             delete_template,
+            ensure_library_initialized,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
