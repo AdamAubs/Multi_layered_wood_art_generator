@@ -15,6 +15,9 @@ interface PipelineInputProps {
   imagePath: string;
   onPathChange: (path: string) => void;
   onBrowse: () => void;
+  promptValue: string;
+  onPromptChange: (value: string) => void;
+  onPreparePromptForRun: (prompt: string | null) => void;
   onStart: (
     stockSizeIn: string | null,
     bridgeCountIn: number | null,
@@ -28,6 +31,9 @@ export function PipelineInput({
   imagePath,
   onPathChange,
   onBrowse,
+  promptValue,
+  onPromptChange,
+  onPreparePromptForRun,
   onStart,
   isDisabled,
 }: PipelineInputProps) {
@@ -92,6 +98,20 @@ export function PipelineInput({
     !(isBridgeCustom && (customBridge.length === 0 || bridgeCustomIsInvalid)) &&
     !(isMergeCustom && (customMerge.length === 0 || mergeCustomIsInvalid));
 
+  function handleStart() {
+    const normalizedPrompt = promptValue.trim();
+    onPreparePromptForRun(
+      normalizedPrompt.length > 0 ? normalizedPrompt : null,
+    );
+
+    onStart(
+      stockSizeValue,
+      bridgeCountValue,
+      mergeVisibleFractionValue,
+      omegaBudgetFactorValue,
+    );
+  }
+
   return (
     <div className="start-container">
       <div className="input-container">
@@ -107,6 +127,23 @@ export function PipelineInput({
             Browse...
           </button>
         </label>
+
+        <label>
+          Image-generation prompt (optional)
+          <textarea
+            value={promptValue}
+            onChange={(e) => onPromptChange(e.currentTarget.value)}
+            placeholder="Paste the prompt used to create this image."
+            rows={5}
+            disabled={isDisabled}
+          />
+        </label>
+        <p
+          style={{ marginTop: "4px", marginBottom: "10px", fontSize: "0.9em" }}
+        >
+          This prompt is saved for future image and pipeline tuning. It is not
+          required by the wood-art generator.
+        </p>
 
         <div className="additional-options-container">
           <label>
@@ -260,17 +297,7 @@ export function PipelineInput({
           </div>
         )}
 
-        <button
-          onClick={() =>
-            onStart(
-              stockSizeValue,
-              bridgeCountValue,
-              mergeVisibleFractionValue,
-              omegaBudgetFactorValue,
-            )
-          }
-          disabled={!canStart}
-        >
+        <button onClick={handleStart} disabled={!canStart}>
           {isDisabled ? "Job running..." : "Start job"}
         </button>
       </div>

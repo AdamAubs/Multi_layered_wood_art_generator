@@ -12,7 +12,7 @@ pub use types::{JobStatus, JobSnapshot, PaletteColor, LayerWinner, FinalArtifact
 pub use artifacts::list_final_artifacts;
 pub use pipeline::{start_job, get_job_status};
 pub use template_store::{list_templates, save_template, delete_template};
-pub use library_store::ensure_library_initialized;
+pub use library_store::{ensure_library_initialized, list_projects, create_project};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -31,6 +31,8 @@ pub fn run() {
             save_template,
             delete_template,
             ensure_library_initialized,
+            list_projects,
+            create_project,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

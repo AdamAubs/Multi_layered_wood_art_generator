@@ -13,6 +13,8 @@ type Page = "generator" | "library";
 
 function App() {
   const [page, setPage] = useState<Page>("generator");
+  const [runPromptDraft, setRunPromptDraft] = useState("");
+  const [, setPreparedPromptForNextRun] = useState<string | null>(null);
 
   const { imagePath, setImagePath, browseForImage } = useImagePath();
   const { job, uiError, startJob } = useJob();
@@ -35,6 +37,9 @@ function App() {
             imagePath={imagePath}
             onPathChange={setImagePath}
             onBrowse={browseForImage}
+            promptValue={runPromptDraft}
+            onPromptChange={setRunPromptDraft}
+            onPreparePromptForRun={setPreparedPromptForNextRun}
             onStart={(
               stockSizeIn,
               bridgeCountIn,
