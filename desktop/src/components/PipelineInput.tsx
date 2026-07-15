@@ -12,13 +12,15 @@ const OMEGA_PRESETS = ["0.008", "0.01", "0.012", "0.02"];
 const FRACTION_REGEX = /^(0?\.\d+)$/; // simple: 0.xx
 
 interface PipelineInputProps {
+  projectId: string;
+  onProjectIdChange: (value: string) => void;
   imagePath: string;
   onPathChange: (path: string) => void;
   onBrowse: () => void;
   promptValue: string;
   onPromptChange: (value: string) => void;
-  onPreparePromptForRun: (prompt: string | null) => void;
   onStart: (
+    promptIn: string | null,
     stockSizeIn: string | null,
     bridgeCountIn: number | null,
     mergeVisibleFractionIn: number | null,
@@ -28,12 +30,13 @@ interface PipelineInputProps {
 }
 
 export function PipelineInput({
+  projectId,
+  onProjectIdChange,
   imagePath,
   onPathChange,
   onBrowse,
   promptValue,
   onPromptChange,
-  onPreparePromptForRun,
   onStart,
   isDisabled,
 }: PipelineInputProps) {
@@ -93,6 +96,7 @@ export function PipelineInput({
 
   const canStart =
     !isDisabled &&
+    projectId.trim().length > 0 &&
     imagePath.trim().length > 0 &&
     !(isCustom && (customStock.length === 0 || customIsInvalid)) &&
     !(isBridgeCustom && (customBridge.length === 0 || bridgeCustomIsInvalid)) &&
@@ -100,11 +104,8 @@ export function PipelineInput({
 
   function handleStart() {
     const normalizedPrompt = promptValue.trim();
-    onPreparePromptForRun(
-      normalizedPrompt.length > 0 ? normalizedPrompt : null,
-    );
-
     onStart(
+      normalizedPrompt.length > 0 ? normalizedPrompt : null,
       stockSizeValue,
       bridgeCountValue,
       mergeVisibleFractionValue,
@@ -115,6 +116,16 @@ export function PipelineInput({
   return (
     <div className="start-container">
       <div className="input-container">
+        <label>
+          Project ID
+          <input
+            value={projectId}
+            onChange={(e) => onProjectIdChange(e.currentTarget.value)}
+            placeholder="e.g. tomorrow-test"
+            disabled={isDisabled}
+          />
+        </label>
+
         <label>
           Image path
           <input

@@ -13,8 +13,8 @@ type Page = "generator" | "library";
 
 function App() {
   const [page, setPage] = useState<Page>("generator");
+  const [selectedProjectId, setSelectedProjectId] = useState("");
   const [runPromptDraft, setRunPromptDraft] = useState("");
-  const [, setPreparedPromptForNextRun] = useState<string | null>(null);
 
   const { imagePath, setImagePath, browseForImage } = useImagePath();
   const { job, uiError, startJob } = useJob();
@@ -34,20 +34,24 @@ function App() {
           </div>
 
           <PipelineInput
+            projectId={selectedProjectId}
+            onProjectIdChange={setSelectedProjectId}
             imagePath={imagePath}
             onPathChange={setImagePath}
             onBrowse={browseForImage}
             promptValue={runPromptDraft}
             onPromptChange={setRunPromptDraft}
-            onPreparePromptForRun={setPreparedPromptForNextRun}
             onStart={(
+              promptIn,
               stockSizeIn,
               bridgeCountIn,
               mergeVisibleFractionIn,
               omegaBudgetFactorIn,
             ) =>
               startJob(
+                selectedProjectId,
                 imagePath,
+                promptIn,
                 stockSizeIn,
                 bridgeCountIn,
                 mergeVisibleFractionIn,
