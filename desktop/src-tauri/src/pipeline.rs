@@ -1,21 +1,249 @@
-use std::io::BufRead;
-use std::path::PathBuf;
+use std::fs;
+use std::fs::File;
+use std::io::{BufRead, Write};
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::thread;
 
+use chrono::Local;
+
+use crate::library_store::resolve_library_root;
+use crate::library_types::{
+    OutputPaths, ParameterSnapshot, PromptRef, RunSource, RunStatus as SavedRunStatus,
+    SavedRunSummary,
+};
 use crate::log_tail::try_load_palette;
-use crate::state::{job_store, is_terminal, set_status, set_message, set_final_dir, now_millis};
+use crate::state::{is_terminal, job_store, now_millis, set_final_dir, set_message, set_status};
 use crate::types::{JobState, JobStatus};
 
-#[tauri::command]
-pub fn start_job(image_path: String, stock_size_in: Option<String>, bridge_count: Option<u32>, merge_visible_fraction: Option<f64>, omega_budget_factor: Option<f64>) -> Result<crate::types::JobSnapshot, String> {
-    let trimmed = image_path.trim().to_string();
+struct PreparedRun {
+    run_json_path: PathBuf,
+    runtime_log_abs: PathBuf,
+    summary: SavedRunSummary,
+}
 
-    if trimmed.is_empty() {
+fn now_rfc3339() -> String {
+    Local::now().to_rfc3339()
+}
+
+fn run_day_token() -> String {
+    Local::now().format("%Y%m%d").to_string()
+}
+
+fn write_run_json(path: &Path, summary: &SavedRunSummary) -> Result<(), String> {
+    let json = serde_json::to_string_pretty(summary)
+        .map_err(|e| format!("Failed to serialize run.json at {}: {e}", path.display()))?;
+    fs::write(path, format!("{json}\n"))
+        .map_err(|e| format!("Failed to write run.json at {}: {e}", path.display()))
+}
+
+fn normalize_prompt(prompt: Option<String>) -> Option<String> {
+    prompt.and_then(|p| {
+        let trimmed = p.trim().to_string();
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed)
+        }
+    })
+}
+
+fn allocate_next_run_dir(runs_dir: &Path) -> Result<(String, PathBuf), String> {
+    let day = run_day_token();
+    let prefix = format!("run-{day}-");
+    let mut max_seq = 0_u32;
+
+    if runs_dir.exists() {
+        let entries = fs::read_dir(runs_dir)
+            .map_err(|e| format!("Failed to read runs directory {}: {e}", runs_dir.display()))?;
+
+        for entry in entries {
+            let entry = entry.map_err(|e| format!("Failed to read runs entry: {e}"))?;
+            let path = entry.path();
+            if !path.is_dir() {
+                continue;
+            }
+
+            let Some(name) = path.file_name().and_then(|s| s.to_str()) else {
+                continue;
+            };
+
+            if !name.starts_with(&prefix) {
+                continue;
+            }
+
+            let seq_part = &name[prefix.len()..];
+            if let Ok(seq) = seq_part.parse::<u32>() {
+                if seq > max_seq {
+                    max_seq = seq;
+                }
+            }
+        }
+    }
+
+    let mut next = max_seq + 1;
+    while next <= 999 {
+        let run_id = format!("{prefix}{next:03}");
+        let run_dir = runs_dir.join(&run_id);
+        if !run_dir.exists() {
+            fs::create_dir(&run_dir)
+                .map_err(|e| format!("Failed to create run dir {}: {e}", run_dir.display()))?;
+            return Ok((run_id, run_dir));
+        }
+        next += 1;
+    }
+
+    Err(format!(
+        "Could not allocate a unique run id for date {} in {}",
+        day,
+        runs_dir.display()
+    ))
+}
+
+fn prepare_run_folder(
+    project_id: &str,
+    image_path: &str,
+    prompt: Option<String>,
+    parameters: ParameterSnapshot,
+) -> Result<PreparedRun, String> {
+    let library_root = resolve_library_root()?;
+    let project_dir = library_root.join("projects").join(project_id);
+
+    if !project_dir.is_dir() {
+        return Err(format!(
+            "Selected project does not exist: {}",
+            project_dir.display()
+        ));
+    }
+
+    if !project_dir.join("project.json").is_file() {
+        return Err(format!(
+            "Selected project is missing project.json: {}",
+            project_dir.display()
+        ));
+    }
+
+    let runs_dir = project_dir.join("runs");
+    fs::create_dir_all(&runs_dir)
+        .map_err(|e| format!("Failed to ensure runs directory {}: {e}", runs_dir.display()))?;
+
+    let (run_id, run_dir) = allocate_next_run_dir(&runs_dir)?;
+
+    let source_dir = run_dir.join("source");
+    let outputs_dir = run_dir.join("outputs");
+    let logs_dir = run_dir.join("logs");
+
+    fs::create_dir_all(&source_dir)
+        .map_err(|e| format!("Failed to create source directory {}: {e}", source_dir.display()))?;
+    fs::create_dir_all(&outputs_dir).map_err(|e| {
+        format!(
+            "Failed to create outputs directory {}: {e}",
+            outputs_dir.display()
+        )
+    })?;
+    fs::create_dir_all(&logs_dir)
+        .map_err(|e| format!("Failed to create logs directory {}: {e}", logs_dir.display()))?;
+
+    let source_path = PathBuf::from(image_path);
+    let original_filename = source_path
+        .file_name()
+        .and_then(|s| s.to_str())
+        .ok_or_else(|| format!("Image path has no valid filename: {image_path}"))?
+        .to_string();
+
+    let input_rel = match source_path.extension().and_then(|s| s.to_str()) {
+        Some(ext) if !ext.is_empty() => format!("source/input.{ext}"),
+        _ => "source/input".to_string(),
+    };
+    let input_abs = run_dir.join(&input_rel);
+
+    fs::copy(&source_path, &input_abs).map_err(|e| {
+        format!(
+            "Failed to copy source image into run folder {} -> {}: {e}",
+            source_path.display(),
+            input_abs.display()
+        )
+    })?;
+
+    let prompt_ref = match normalize_prompt(prompt) {
+        Some(text) => {
+            let prompt_rel = "source/prompt.md".to_string();
+            let prompt_abs = run_dir.join(&prompt_rel);
+            fs::write(&prompt_abs, format!("{text}\n"))
+                .map_err(|e| format!("Failed to write prompt file {}: {e}", prompt_abs.display()))?;
+            Some(PromptRef { path: prompt_rel })
+        }
+        None => None,
+    };
+
+    let runtime_log_rel = "logs/runtime.log".to_string();
+    let runtime_log_abs = run_dir.join(&runtime_log_rel);
+
+    let mut runtime_log = File::create(&runtime_log_abs)
+        .map_err(|e| format!("Failed to create runtime log {}: {e}", runtime_log_abs.display()))?;
+    writeln!(
+        runtime_log,
+        "Run {} created at {} for project {}",
+        run_id,
+        now_rfc3339(),
+        project_id
+    )
+    .map_err(|e| format!("Failed to initialize runtime log {}: {e}", runtime_log_abs.display()))?;
+
+    let summary = SavedRunSummary {
+        schema_version: 1,
+        run_id: run_id.clone(),
+        project_id: project_id.to_string(),
+        status: SavedRunStatus::Pending,
+        created_at: now_rfc3339(),
+        started_at: None,
+        finished_at: None,
+        source: RunSource {
+            original_filename,
+            input_path: input_rel,
+        },
+        prompt: prompt_ref,
+        parameters,
+        outputs: OutputPaths {
+            generator: "outputs/generator".to_string(),
+            postprocessed: "outputs/postprocessed".to_string(),
+            final_output: "outputs/final".to_string(),
+        },
+        runtime_log_path: runtime_log_rel,
+        exit_code: None,
+    };
+
+    let run_json_path = run_dir.join("run.json");
+    write_run_json(&run_json_path, &summary)?;
+
+    Ok(PreparedRun {
+        run_json_path,
+        runtime_log_abs,
+        summary,
+    })
+}
+
+#[tauri::command]
+pub fn start_job(
+    project_id: String,
+    image_path: String,
+    prompt: Option<String>,
+    stock_size_in: Option<String>,
+    bridge_count_in: Option<u32>,
+    merge_visible_fraction: Option<f64>,
+    omega_budget_factor: Option<f64>,
+) -> Result<crate::types::JobSnapshot, String> {
+    let project_id_trimmed = project_id.trim().to_string();
+    if project_id_trimmed.is_empty() {
+        return Err("Please select a project first.".to_string());
+    }
+
+    let image_path_trimmed = image_path.trim().to_string();
+    if image_path_trimmed.is_empty() {
         return Err("Please choose an image path first.".to_string());
     }
-    if !PathBuf::from(&trimmed).is_file() {
-        return Err(format!("Image path does not exist: {trimmed}"));
+    if !PathBuf::from(&image_path_trimmed).is_file() {
+        return Err(format!("Image path does not exist: {image_path_trimmed}"));
     }
 
     let mut guard = job_store()
@@ -30,7 +258,23 @@ pub fn start_job(image_path: String, stock_size_in: Option<String>, bridge_count
 
     let job_id = format!("job-{}", now_millis());
 
-    let run_name = PathBuf::from(&trimmed)
+    let parameter_snapshot = ParameterSnapshot {
+        stock_size_in: stock_size_in.clone(),
+        support_bridges_per_patch: bridge_count_in.unwrap_or(5),
+        merge_visible_fraction,
+        omega_budget_factor,
+        generate_composite_preview: true,
+        generate_showcase_preview: true,
+    };
+
+    let prepared = prepare_run_folder(
+        &project_id_trimmed,
+        &image_path_trimmed,
+        prompt,
+        parameter_snapshot,
+    )?;
+
+    let run_name = PathBuf::from(&image_path_trimmed)
         .file_stem()
         .and_then(|s| s.to_str())
         .unwrap_or("unknown")
@@ -40,7 +284,7 @@ pub fn start_job(image_path: String, stock_size_in: Option<String>, bridge_count
         job_id: job_id.clone(),
         status: JobStatus::Preprocessing,
         started_at: std::time::Instant::now(),
-        message: "Pipeline started...".to_string(),
+        message: format!("Run {} prepared. Starting pipeline...", prepared.summary.run_id),
         error: None,
         n_colors: None,
         palette: Vec::new(),
@@ -80,6 +324,19 @@ pub fn start_job(image_path: String, stock_size_in: Option<String>, bridge_count
             return;
         }
 
+        let mut run_summary = prepared.summary.clone();
+        run_summary.status = SavedRunStatus::Running;
+        run_summary.started_at = Some(now_rfc3339());
+        if let Err(e) = write_run_json(&prepared.run_json_path, &run_summary) {
+            set_status(
+                &job_id,
+                JobStatus::Failed,
+                "Failed to update run status to running.".to_string(),
+                Some(e),
+            );
+            return;
+        }
+
         let log_path = repo_root.join(format!("output_final_{}/run_log.txt", run_name));
         {
             let lp = log_path.clone();
@@ -91,13 +348,13 @@ pub fn start_job(image_path: String, stock_size_in: Option<String>, bridge_count
         cmd.arg("-u")
             .arg("pipeline.py")
             .arg("--image")
-            .arg(&trimmed);
+            .arg(&image_path_trimmed);
 
         if let Some(ref size) = stock_size_in {
             cmd.arg("--stock-size-in").arg(size);
         }
 
-        if let Some(bc) = bridge_count {
+        if let Some(bc) = bridge_count_in {
             cmd.arg("--bridge-count").arg(bc.to_string());
         }
 
@@ -106,7 +363,7 @@ pub fn start_job(image_path: String, stock_size_in: Option<String>, bridge_count
         }
 
         if let Some(v) = omega_budget_factor {
-           cmd.arg("--omega-budget-factor").arg(v.to_string());
+            cmd.arg("--omega-budget-factor").arg(v.to_string());
         }
 
         let mut child = match cmd
@@ -117,6 +374,11 @@ pub fn start_job(image_path: String, stock_size_in: Option<String>, bridge_count
         {
             Ok(c) => c,
             Err(e) => {
+                run_summary.status = SavedRunStatus::Failed;
+                run_summary.finished_at = Some(now_rfc3339());
+                run_summary.exit_code = Some(-1);
+                let _ = write_run_json(&prepared.run_json_path, &run_summary);
+
                 set_status(
                     &job_id,
                     JobStatus::Failed,
@@ -130,6 +392,14 @@ pub fn start_job(image_path: String, stock_size_in: Option<String>, bridge_count
         if let Some(stdout) = child.stdout.take() {
             for line in std::io::BufReader::new(stdout).lines().flatten() {
                 let l = line.trim().to_string();
+
+                if let Ok(mut logf) = fs::OpenOptions::new()
+                    .append(true)
+                    .create(true)
+                    .open(&prepared.runtime_log_abs)
+                {
+                    let _ = writeln!(logf, "{l}");
+                }
 
                 if l.contains("--- Preprocessor ---") {
                     set_status(
@@ -170,6 +440,11 @@ pub fn start_job(image_path: String, stock_size_in: Option<String>, bridge_count
 
         match child.wait() {
             Ok(exit) if exit.success() => {
+                run_summary.status = SavedRunStatus::Completed;
+                run_summary.finished_at = Some(now_rfc3339());
+                run_summary.exit_code = Some(exit.code().unwrap_or(0));
+                let _ = write_run_json(&prepared.run_json_path, &run_summary);
+
                 set_status(
                     &job_id,
                     JobStatus::Complete,
@@ -177,7 +452,12 @@ pub fn start_job(image_path: String, stock_size_in: Option<String>, bridge_count
                     None,
                 );
             }
-            Ok(_) => {
+            Ok(exit) => {
+                run_summary.status = SavedRunStatus::Failed;
+                run_summary.finished_at = Some(now_rfc3339());
+                run_summary.exit_code = Some(exit.code().unwrap_or(1));
+                let _ = write_run_json(&prepared.run_json_path, &run_summary);
+
                 set_status(
                     &job_id,
                     JobStatus::Failed,
@@ -187,6 +467,11 @@ pub fn start_job(image_path: String, stock_size_in: Option<String>, bridge_count
                 );
             }
             Err(e) => {
+                run_summary.status = SavedRunStatus::Failed;
+                run_summary.finished_at = Some(now_rfc3339());
+                run_summary.exit_code = Some(-1);
+                let _ = write_run_json(&prepared.run_json_path, &run_summary);
+
                 set_status(
                     &job_id,
                     JobStatus::Failed,
