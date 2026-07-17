@@ -20,7 +20,7 @@ output_generator_*/
 preprocessor_output*/
 
 # Annotated Output files
-LazyLayerzzzLibrary/
+/LazyLayerzzzLibrary/
 
 # Go Server
 server/.env
