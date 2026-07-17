@@ -57,3 +57,16 @@ export type SavedRunSummary = {
   runtimeLogPath: string;
   exitCode: number | null;
 };
+
+export type LibraryRunEntry = {
+  run: SavedRunSummary;
+  runDirAbs: string;
+  finalOutputDirAbs: string;
+  promptSaved: boolean;
+  inputFilename: string;
+};
+
+export type LibraryProjectEntry = {
+  project: ProjectSummary;
+  runs: LibraryRunEntry[];
+};

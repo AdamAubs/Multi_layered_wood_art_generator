@@ -596,8 +596,6 @@ let mut child = match cmd
             final_message,
             final_error,
         );
-
-
     });
 
     Ok(crate::state::snapshot_from_state(&initial))

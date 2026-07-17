@@ -7,7 +7,7 @@ import { isRunningStatus } from "./utils/statusHelpers";
 import { PipelineInput } from "./components/PipelineInput";
 import { JobStatus } from "./components/JobStatus";
 import { ArtifactPreview } from "./components/ArtifactPreview";
-import { TemplateLibraryPage } from "./components/TemplateLibraryPage";
+import { LibraryPage } from "./components/LibraryPage";
 import "./App.css";
 
 type Page = "generator" | "library";
@@ -53,9 +53,7 @@ function App() {
         <>
           <h1>Multi-layered Wood Art Generator</h1>
           <div className="page-nav">
-            <button onClick={() => setPage("library")}>
-              Go To Prompt Library
-            </button>
+            <button onClick={() => setPage("library")}>Go To Library</button>
           </div>
 
           <PipelineInput
@@ -105,7 +103,7 @@ function App() {
           )}
         </>
       ) : (
-        <TemplateLibraryPage onBackToGenerator={() => setPage("generator")} />
+        <LibraryPage onBackToGenerator={() => setPage("generator")} />
       )}
     </main>
   );

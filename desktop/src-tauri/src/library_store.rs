@@ -1,8 +1,9 @@
-use crate::library_types::{CreateProjectRequest, ProjectSummary};
-use serde::Serialize;
+use crate::library_types::{CreateProjectRequest, ProjectSummary, SavedRunSummary};
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 const LIBRARY_DIR_NAME: &str = "LazyLayerzzzLibrary";
@@ -352,4 +353,176 @@ mod tests {
 
         let _ = fs::remove_dir_all(root);
     }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LibraryRunEntry {
+    pub run: SavedRunSummary,
+    pub run_dir_abs: String,
+    pub final_output_dir_abs: String,
+    pub prompt_saved: bool,
+    pub input_filename: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LibraryProjectEntry {
+    pub project: ProjectSummary,
+    pub runs: Vec<LibraryRunEntry>,
+}
+
+fn parse_run_json(run_json_path: &Path) -> Result<SavedRunSummary, String> {
+    let raw = fs::read_to_string(run_json_path)
+        .map_err(|e| format!("Failed to read {}: {e}", run_json_path.display()))?;
+
+    serde_json::from_str::<SavedRunSummary>(&raw)
+        .map_err(|e| format!("Invalid run.json at {}: {e}", run_json_path.display()))
+}
+
+fn list_runs_for_project(project_dir: &Path) -> Vec<LibraryRunEntry> {
+    let runs_root = project_dir.join("runs");
+    if !runs_root.is_dir() {
+        return Vec::new();
+    }
+
+    let mut runs = Vec::<LibraryRunEntry>::new();
+
+    let entries = match fs::read_dir(&runs_root) {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("Failed to read runs dir {}: {e}", runs_root.display());
+            return runs;
+        }
+    };
+
+    for entry in entries {
+        let entry = match entry {
+            Ok(v) => v,
+            Err(e) => {
+                eprintln!("Failed reading run entry: {e}");
+                continue;
+            }
+        };
+
+        let run_dir = entry.path();
+        if !run_dir.is_dir() {
+            continue;
+        }
+
+        let run_json = run_dir.join("run.json");
+        if !run_json.is_file() {
+            eprintln!("Skipping run without run.json: {}", run_dir.display());
+            continue;
+        }
+
+        match parse_run_json(&run_json) {
+            Ok(run) => {
+                let final_output_dir = run_dir.join(&run.outputs.final_output);
+                let final_output_dir_abs = final_output_dir
+                    .canonicalize()
+                    .unwrap_or(final_output_dir.clone())
+                    .to_string_lossy()
+                    .to_string();
+
+                let run_dir_abs = run_dir
+                    .canonicalize()
+                    .unwrap_or(run_dir.clone())
+                    .to_string_lossy()
+                    .to_string();
+
+                runs.push(LibraryRunEntry {
+                    input_filename: run.source.original_filename.clone(),
+                    prompt_saved: run.prompt.is_some(),
+                    run,
+                    run_dir_abs,
+                    final_output_dir_abs,
+                });
+            }
+            Err(err) => {
+                eprintln!("{err}");
+            }
+        }
+    }
+
+    // Newest first
+    runs.sort_by(|a, b| b.run.created_at.cmp(&a.run.created_at));
+
+    runs
+}
+
+fn list_library_projects_with_runs_in_root(
+    repo_root: &Path,
+) -> Result<Vec<LibraryProjectEntry>, String> {
+    let projects = list_projects_in_root(repo_root)?;
+    let projects_root = initialize_library_in_root(repo_root)?.projects_path;
+    let projects_root = PathBuf::from(projects_root);
+
+    let mut out = Vec::<LibraryProjectEntry>::new();
+
+    for project in projects {
+        let project_dir = projects_root.join(&project.project_id);
+        let runs = list_runs_for_project(&project_dir);
+
+        out.push(LibraryProjectEntry { project, runs });
+    }
+
+    Ok(out)
+}
+
+#[tauri::command]
+pub fn list_library_projects_with_runs() -> Result<Vec<LibraryProjectEntry>, String> {
+    let repo_root = resolve_repo_root()?;
+    list_library_projects_with_runs_in_root(&repo_root)
+}
+
+#[tauri::command]
+pub fn open_in_file_browser(path: String) -> Result<(), String> {
+    let trimmed = path.trim();
+    if trimmed.is_empty() {
+        return Err("Path is required.".to_string());
+    }
+
+    let target = PathBuf::from(trimmed);
+    if !target.exists() {
+        return Err(format!("Path does not exist: {}", target.display()));
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        let status = Command::new("open")
+            .arg(&target)
+            .status()
+            .map_err(|e| format!("Failed to open path {}: {e}", target.display()))?;
+
+        if !status.success() {
+            return Err(format!("open command failed for {}", target.display()));
+        }
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        let status = Command::new("explorer")
+            .arg(&target)
+            .status()
+            .map_err(|e| format!("Failed to open path {}: {e}", target.display()))?;
+
+        if !status.success() {
+            return Err(format!("explorer command failed for {}", target.display()));
+        }
+    }
+
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        let status = Command::new("xdg-open")
+            .arg(&target)
+            .status()
+            .map_err(|e| format!("Failed to open path {}: {e}", target.display()))?;
+
+        if !status.success() {
+            return Err(format!("xdg-open command failed for {}", target.display()));
+        }
+    }
+
+    Ok(())
 }
