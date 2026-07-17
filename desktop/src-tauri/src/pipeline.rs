@@ -17,6 +17,7 @@ use crate::state::{is_terminal, job_store, now_millis, set_final_dir, set_messag
 use crate::types::{JobState, JobStatus};
 
 struct PreparedRun {
+    run_root: PathBuf,
     run_json_path: PathBuf,
     runtime_log_abs: PathBuf,
     summary: SavedRunSummary,
@@ -217,10 +218,84 @@ fn prepare_run_folder(
     write_run_json(&run_json_path, &summary)?;
 
     Ok(PreparedRun {
+        run_root: run_dir,
         run_json_path,
         runtime_log_abs,
         summary,
     })
+}
+
+fn append_runtime_log(path: &Path, line: &str) {
+    if let Ok(mut file) = fs::OpenOptions::new().append(true).create(true).open(path) {
+        let _ = writeln!(file, "{line}");
+    }
+}
+
+fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<bool, String> {
+    if !src.exists() {
+        return Ok(false);
+    }
+    if !src.is_dir() {
+        return Err(format!("Source path is not a directory: {}", src.display()));
+    }
+
+    fs::create_dir_all(dst)
+        .map_err(|e| format!("Failed to create destination directory {}: {e}", dst.display()))?;
+
+    let entries = fs::read_dir(src)
+        .map_err(|e| format!("Failed to read source directory {}: {e}", src.display()))?;
+
+    for entry in entries {
+        let entry = entry.map_err(|e| format!("Failed to read directory entry: {e}"))?;
+        let src_path = entry.path();
+        let dst_path = dst.join(entry.file_name());
+
+        if src_path.is_dir() {
+            copy_dir_recursive(&src_path, &dst_path)?;
+        } else if src_path.is_file() {
+            fs::copy(&src_path, &dst_path).map_err(|e| {
+                format!(
+                    "Failed to copy file {} -> {}: {e}",
+                    src_path.display(),
+                    dst_path.display()
+                )
+            })?;
+        }
+    }
+
+    Ok(true)
+}
+
+fn copy_pipeline_outputs(
+    repo_root: &Path,
+    run_name: &str,
+    final_src_from_stdout: Option<&PathBuf>,
+    run_root: &Path,
+    require_final_on_success: bool,
+) -> Result<(), String> {
+    let generator_src = repo_root.join(format!("output_generator_{run_name}"));
+    let postprocessed_src = repo_root.join(format!("output_postprocessed_{run_name}"));
+    let final_src = final_src_from_stdout
+        .cloned()
+        .unwrap_or_else(|| repo_root.join(format!("output_final_{run_name}")));
+
+    let outputs_root = run_root.join("outputs");
+    let generator_dst = outputs_root.join("generator");
+    let postprocessed_dst = outputs_root.join("postprocessed");
+    let final_dst = outputs_root.join("final");
+
+    let _copied_generator = copy_dir_recursive(&generator_src, &generator_dst)?;
+    let _copied_post = copy_dir_recursive(&postprocessed_src, &postprocessed_dst)?;
+    let copied_final = copy_dir_recursive(&final_src, &final_dst)?;
+
+    if require_final_on_success && !copied_final {
+        return Err(format!(
+            "Expected final output directory was not found for successful run: {}",
+            final_src.display()
+        ));
+    }
+
+    Ok(())
 }
 
 #[tauri::command]
@@ -366,10 +441,10 @@ pub fn start_job(
             cmd.arg("--omega-budget-factor").arg(v.to_string());
         }
 
-        let mut child = match cmd
+let mut child = match cmd
             .current_dir(&repo_root)
             .stdout(Stdio::piped())
-            .stderr(Stdio::inherit())
+            .stderr(Stdio::piped())
             .spawn()
         {
             Ok(c) => c,
@@ -389,17 +464,23 @@ pub fn start_job(
             }
         };
 
+        // Capture stderr into runtime.log without using it for status parsing.
+        let stderr_handle = child.stderr.take().map(|stderr| {
+            let runtime_log_path = prepared.runtime_log_abs.clone();
+            thread::spawn(move || {
+                for line in std::io::BufReader::new(stderr).lines().flatten() {
+                    append_runtime_log(&runtime_log_path, &format!("[stderr] {line}"));
+                }
+            })
+        });
+
+        let mut final_src_from_stdout: Option<PathBuf> = None;
+
+        // Parse stdout for status transitions and final output location, and also log it.
         if let Some(stdout) = child.stdout.take() {
             for line in std::io::BufReader::new(stdout).lines().flatten() {
                 let l = line.trim().to_string();
-
-                if let Ok(mut logf) = fs::OpenOptions::new()
-                    .append(true)
-                    .create(true)
-                    .open(&prepared.runtime_log_abs)
-                {
-                    let _ = writeln!(logf, "{l}");
-                }
+                append_runtime_log(&prepared.runtime_log_abs, &format!("[stdout] {l}"));
 
                 if l.contains("--- Preprocessor ---") {
                     set_status(
@@ -431,6 +512,7 @@ pub fn start_job(
                         .to_string();
 
                     let abs_dir = repo_root.join(raw_dir);
+                    final_src_from_stdout = Some(abs_dir.clone());
                     set_final_dir(&job_id, abs_dir.to_string_lossy().to_string());
                 } else if !l.is_empty() {
                     set_message(&job_id, l);
@@ -438,48 +520,84 @@ pub fn start_job(
             }
         }
 
-        match child.wait() {
-            Ok(exit) if exit.success() => {
-                run_summary.status = SavedRunStatus::Completed;
-                run_summary.finished_at = Some(now_rfc3339());
-                run_summary.exit_code = Some(exit.code().unwrap_or(0));
-                let _ = write_run_json(&prepared.run_json_path, &run_summary);
+        let wait_result = child.wait();
 
-                set_status(
-                    &job_id,
-                    JobStatus::Complete,
-                    "Pipeline finished successfully.".to_string(),
-                    None,
-                );
-            }
-            Ok(exit) => {
-                run_summary.status = SavedRunStatus::Failed;
-                run_summary.finished_at = Some(now_rfc3339());
-                run_summary.exit_code = Some(exit.code().unwrap_or(1));
-                let _ = write_run_json(&prepared.run_json_path, &run_summary);
-
-                set_status(
-                    &job_id,
-                    JobStatus::Failed,
-                    "Pipeline exited with an error. Check the dev terminal for details."
-                        .to_string(),
-                    None,
-                );
-            }
-            Err(e) => {
-                run_summary.status = SavedRunStatus::Failed;
-                run_summary.finished_at = Some(now_rfc3339());
-                run_summary.exit_code = Some(-1);
-                let _ = write_run_json(&prepared.run_json_path, &run_summary);
-
-                set_status(
-                    &job_id,
-                    JobStatus::Failed,
-                    "Pipeline process lost.".to_string(),
-                    Some(e.to_string()),
-                );
-            }
+        if let Some(handle) = stderr_handle {
+            let _ = handle.join();
         }
+
+        let (process_success, process_exit_code, process_message, process_error) = match wait_result {
+            Ok(exit) if exit.success() => (
+                true,
+                exit.code().unwrap_or(0),
+                "Pipeline finished successfully.".to_string(),
+                None,
+            ),
+            Ok(exit) => (
+                false,
+                exit.code().unwrap_or(1),
+                "Pipeline exited with an error. Check logs/runtime.log for details.".to_string(),
+                None,
+            ),
+            Err(e) => (
+                false,
+                -1,
+                "Pipeline process lost.".to_string(),
+                Some(e.to_string()),
+            ),
+        };
+
+        // Always attempt output copy after process finishes.
+        let copy_error = copy_pipeline_outputs(
+            &repo_root,
+            &run_name,
+            final_src_from_stdout.as_ref(),
+            &prepared.run_root,
+            process_success,
+        )
+        .err();
+
+        if let Some(err) = &copy_error {
+            append_runtime_log(
+                &prepared.runtime_log_abs,
+                &format!("[system] Output copy error: {err}"),
+            );
+        }
+
+        let final_success = process_success && copy_error.is_none();
+
+        run_summary.status = if final_success {
+            SavedRunStatus::Completed
+        } else {
+            SavedRunStatus::Failed
+        };
+        run_summary.finished_at = Some(now_rfc3339());
+        run_summary.exit_code = Some(process_exit_code);
+        let _ = write_run_json(&prepared.run_json_path, &run_summary);
+
+        let final_message = match &copy_error {
+            Some(err) => format!("{process_message} Output copy failed: {err}"),
+            None => process_message,
+        };
+
+        let final_error = if process_error.is_some() {
+            process_error
+        } else {
+            copy_error
+        };
+
+        set_status(
+            &job_id,
+            if final_success {
+                JobStatus::Complete
+            } else {
+                JobStatus::Failed
+            },
+            final_message,
+            final_error,
+        );
+
+
     });
 
     Ok(crate::state::snapshot_from_state(&initial))
