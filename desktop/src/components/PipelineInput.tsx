@@ -1,21 +1,34 @@
 import { useState } from "react";
+import { ProjectSummary } from "../types";
 
 const STOCK_PRESETS = ["12x20", "8x12", "18x24", "24x48"];
 const STOCK_SIZE_REGEX = /^\d+(\.\d+)?x\d+(\.\d+)?$/;
 
 const BRIDGE_PRESETS = ["3", "5", "8", "10", "12"];
-const BRIDGE_COUNT_REGEX = /^\d+$/; // positive integer only
+const BRIDGE_COUNT_REGEX = /^\d+$/;
 
 const MERGE_PRESETS = ["0.01", "0.02", "0.03", "0.05", "0.1"];
 const OMEGA_PRESETS = ["0.008", "0.01", "0.012", "0.02"];
-
-const FRACTION_REGEX = /^(0?\.\d+)$/; // simple: 0.xx
+const FRACTION_REGEX = /^(0?\.\d+)$/;
 
 interface PipelineInputProps {
+  selectedProjectId: string;
+  onSelectProjectId: (value: string) => void;
+  projects: ProjectSummary[];
+  isLoadingProjects: boolean;
+  isCreatingProject: boolean;
+  projectsError: string;
+  newProjectTitle: string;
+  onNewProjectTitleChange: (value: string) => void;
+  onCreateProject: () => void;
+  onRefreshProjects: () => void;
   imagePath: string;
   onPathChange: (path: string) => void;
   onBrowse: () => void;
+  promptValue: string;
+  onPromptChange: (value: string) => void;
   onStart: (
+    promptIn: string | null,
     stockSizeIn: string | null,
     bridgeCountIn: number | null,
     mergeVisibleFractionIn: number | null,
@@ -25,9 +38,21 @@ interface PipelineInputProps {
 }
 
 export function PipelineInput({
+  selectedProjectId,
+  onSelectProjectId,
+  projects,
+  isLoadingProjects,
+  isCreatingProject,
+  projectsError,
+  newProjectTitle,
+  onNewProjectTitleChange,
+  onCreateProject,
+  onRefreshProjects,
   imagePath,
   onPathChange,
   onBrowse,
+  promptValue,
+  onPromptChange,
   onStart,
   isDisabled,
 }: PipelineInputProps) {
@@ -87,14 +112,73 @@ export function PipelineInput({
 
   const canStart =
     !isDisabled &&
+    selectedProjectId.trim().length > 0 &&
     imagePath.trim().length > 0 &&
     !(isCustom && (customStock.length === 0 || customIsInvalid)) &&
     !(isBridgeCustom && (customBridge.length === 0 || bridgeCustomIsInvalid)) &&
     !(isMergeCustom && (customMerge.length === 0 || mergeCustomIsInvalid));
 
+  function handleStart() {
+    const normalizedPrompt = promptValue.trim();
+    onStart(
+      normalizedPrompt.length > 0 ? normalizedPrompt : null,
+      stockSizeValue,
+      bridgeCountValue,
+      mergeVisibleFractionValue,
+      omegaBudgetFactorValue,
+    );
+  }
+
   return (
     <div className="start-container">
       <div className="input-container">
+        <h3>Project</h3>
+        <label>
+          Project
+          <select
+            value={selectedProjectId}
+            onChange={(e) => onSelectProjectId(e.currentTarget.value)}
+            disabled={isDisabled || isLoadingProjects}
+          >
+            <option value="">Select Existing Project</option>
+            {projects.map((p) => (
+              <option key={p.projectId} value={p.projectId}>
+                {p.title} ({p.projectId})
+              </option>
+            ))}
+          </select>
+        </label>
+
+        <div style={{ display: "flex", gap: "8px", alignItems: "end" }}>
+          <label style={{ flex: 1 }}>
+            New project title
+            <input
+              value={newProjectTitle}
+              onChange={(e) => onNewProjectTitleChange(e.currentTarget.value)}
+              placeholder="e.g. Tomorrow Test"
+              disabled={isDisabled || isCreatingProject}
+            />
+          </label>
+          <button
+            onClick={onCreateProject}
+            disabled={
+              isDisabled || isCreatingProject || !newProjectTitle.trim()
+            }
+          >
+            {isCreatingProject ? "Creating..." : "+ New Project"}
+          </button>
+          <button
+            onClick={onRefreshProjects}
+            disabled={isDisabled || isLoadingProjects}
+          >
+            Refresh
+          </button>
+        </div>
+
+        {projectsError && (
+          <p style={{ color: "red", marginTop: "6px" }}>{projectsError}</p>
+        )}
+
         <label>
           Image path
           <input
@@ -107,6 +191,23 @@ export function PipelineInput({
             Browse...
           </button>
         </label>
+
+        <label>
+          Image-generation prompt (optional)
+          <textarea
+            value={promptValue}
+            onChange={(e) => onPromptChange(e.currentTarget.value)}
+            placeholder="Paste the prompt used to create this image."
+            rows={5}
+            disabled={isDisabled}
+          />
+        </label>
+        <p
+          style={{ marginTop: "4px", marginBottom: "10px", fontSize: "0.9em" }}
+        >
+          This prompt is saved for future image and pipeline tuning. It is not
+          required by the wood-art generator.
+        </p>
 
         <div className="additional-options-container">
           <label>
@@ -255,22 +356,12 @@ export function PipelineInput({
           <div
             style={{ color: "#ff6b00", fontSize: "0.9em", marginTop: "6px" }}
           >
-            ⚠ Note: High bridge counts may distort fine details. Consider values
-            ≤10 for best results.
+            Note: High bridge counts may distort fine details. Consider values
+            up to 10 for best results.
           </div>
         )}
 
-        <button
-          onClick={() =>
-            onStart(
-              stockSizeValue,
-              bridgeCountValue,
-              mergeVisibleFractionValue,
-              omegaBudgetFactorValue,
-            )
-          }
-          disabled={!canStart}
-        >
+        <button onClick={handleStart} disabled={!canStart}>
           {isDisabled ? "Job running..." : "Start job"}
         </button>
       </div>

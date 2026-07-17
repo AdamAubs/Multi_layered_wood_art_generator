@@ -1,0 +1,157 @@
+.lib-page {
+  width: min(1320px, 96vw);
+  margin: 24px auto;
+  text-align: left;
+  color: #e8e8e8;
+  line-height: 1.45;
+}
+
+.lib-page h1 {
+  margin: 0;
+  text-align: left;
+  color: #f2f2f2;
+  font-size: clamp(1.75rem, 2.4vw, 2.2rem);
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+
+.lib-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 14px;
+}
+
+.lib-header-actions {
+  display: flex;
+  gap: 10px;
+}
+
+.lib-grid {
+  display: grid;
+  grid-template-columns: 280px 380px 1fr;
+  gap: 16px;
+  align-items: start;
+}
+
+.lib-projects,
+.lib-runs,
+.lib-detail {
+  border: 1px solid #cfcfcf;
+  border-radius: 12px;
+  background: #f5f5f5;
+  color: #1f2328;
+  padding: 14px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+}
+
+.lib-projects h2,
+.lib-runs h2,
+.lib-detail h2 {
+  color: #1a1d21;
+  margin: 0 0 10px 0;
+  font-size: 1.28rem;
+  line-height: 1.2;
+}
+
+.lib-detail h3 {
+  color: #1a1d21;
+  margin: 14px 0 6px;
+  font-size: 1.05rem;
+  line-height: 1.25;
+}
+
+.lib-projects ul,
+.lib-run-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.lib-projects li + li,
+.lib-run-list li + li {
+  margin-top: 8px;
+}
+
+.lib-projects button,
+.lib-run-card button {
+  width: 100%;
+  text-align: left;
+}
+
+.lib-projects button,
+.lib-run-card button,
+.lib-actions button,
+.lib-header-actions button {
+  font-size: 0.95rem;
+  line-height: 1.25;
+}
+
+.lib-run-list {
+  max-height: 62vh;
+  overflow: auto;
+  padding-right: 2px;
+}
+
+.lib-run-card {
+  border: 1px solid #d2d5da;
+  border-radius: 10px;
+  background: #eceeef;
+  padding: 8px;
+}
+
+.lib-run-card p,
+.lib-detail p {
+  margin: 5px 0;
+  color: #2a2f36;
+  font-size: 0.98rem;
+  line-height: 1.4;
+}
+
+.lib-detail strong {
+  color: #111418;
+  font-weight: 650;
+}
+
+.lib-muted {
+  opacity: 1;
+}
+
+/* Project slug text (the lowercase id in parentheses) */
+.lib-projects .lib-muted {
+  display: block;
+  margin-top: 2px;
+  color: #d9e2f2;
+  font-size: 0.78rem;
+  font-weight: 600;
+  line-height: 1.25;
+  letter-spacing: 0.01em;
+}
+
+.lib-active {
+  border-color: #396cd8;
+  box-shadow: 0 0 0 1px rgba(57, 108, 216, 0.24);
+}
+
+.lib-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 14px;
+  flex-wrap: wrap;
+}
+
+.lib-error {
+  color: #ff5f52;
+  font-weight: 600;
+  margin-bottom: 10px;
+}
+
+@media (max-width: 1180px) {
+  .lib-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .lib-run-list {
+    max-height: 44vh;
+  }
+}

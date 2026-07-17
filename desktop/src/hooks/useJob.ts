@@ -20,7 +20,9 @@ export function useJob() {
   }
 
   async function startJob(
+    projectId: string,
     imagePath: string,
+    prompt: string | null,
     stockSizeIn: string | null = null,
     bridgeCountIn: number | null = null,
     mergeVisibleFractionIn: number | null = null,
@@ -28,20 +30,32 @@ export function useJob() {
   ) {
     setUiError("");
 
-    const trimmed = imagePath.trim();
-    if (!trimmed) {
+    const projectIdTrimmed = projectId.trim();
+    if (!projectIdTrimmed) {
+      setUiError("Please select a project first.");
+      return;
+    }
+
+    const imagePathTrimmed = imagePath.trim();
+    if (!imagePathTrimmed) {
       setUiError("Please enter an image path first.");
       return;
     }
 
+    const normalizedPrompt = prompt?.trim() ?? "";
+    const promptOrNull = normalizedPrompt.length > 0 ? normalizedPrompt : null;
+
     try {
       const started = await invoke<JobSnapshot>("start_job", {
-        imagePath: trimmed,
+        projectId: projectIdTrimmed,
+        imagePath: imagePathTrimmed,
+        prompt: promptOrNull,
         stockSizeIn: stockSizeIn ?? null,
         bridgeCountIn: bridgeCountIn ?? null,
         mergeVisibleFraction: mergeVisibleFractionIn ?? null,
         omegaBudgetFactor: omegaBudgetFactorIn ?? null,
       });
+
       setJob(started);
 
       if (pollRef.current !== null) {
