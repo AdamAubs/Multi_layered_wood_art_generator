@@ -72,6 +72,20 @@ PRESETS = {
     ),
 }
 
+VIDEO_VIEWS = ("front", "rear")
+
+
+def resolve_view(view, allow_both=False):
+    choices = VIDEO_VIEWS + (("both",) if allow_both else ())
+    if view in choices:
+        return view
+
+    choices_text = ", ".join(choices)
+    raise ValueError(
+        f"Unknown exploded-video view '{view}'. Choose from: {choices_text}"
+    )
+
+
 def resolve_final_dir(package_dir):
     requested = os.path.abspath(os.path.expanduser(os.fspath(package_dir)))
     candidates = [
@@ -244,15 +258,23 @@ def _resize_bgra_premultiplied(image_bgra, target_size, interpolation):
     ).astype(np.uint8)
     return output
 
-def prepare_video_layers(layers, preset):
+def prepare_video_layers(layers, preset, view="front"):
     preset = resolve_preset(preset)
+    view = resolve_view(view)
     if not layers:
         raise ValueError("No layers were provided for exploded-video rendering")
 
     source_h, source_w = layers[0]["image"].shape[:2]
     layer_count = len(layers)
-    max_dx = abs(preset.layer_gap_x_px) * max(0, layer_count - 1)
-    max_dy = abs(preset.layer_gap_y_px) * max(0, layer_count - 1)
+    if view == "rear":
+        layer_gap_x_px = -abs(preset.layer_gap_x_px)
+        layer_gap_y_px = -abs(preset.layer_gap_y_px)
+    else:
+        layer_gap_x_px = preset.layer_gap_x_px
+        layer_gap_y_px = preset.layer_gap_y_px
+
+    max_dx = abs(layer_gap_x_px) * max(0, layer_count - 1)
+    max_dy = abs(layer_gap_y_px) * max(0, layer_count - 1)
 
     available_w = preset.width - 2 * preset.margin_px - max_dx
     available_h = preset.height - 2 * preset.margin_px - max_dy
@@ -267,10 +289,10 @@ def prepare_video_layers(layers, preset):
     target_h = max(1, int(round(source_h * scale)))
     interpolation = cv2.INTER_AREA if scale < 1.0 else cv2.INTER_LANCZOS4
 
-    min_dx = min(0, preset.layer_gap_x_px * max(0, layer_count - 1))
-    max_dx_signed = max(0, preset.layer_gap_x_px * max(0, layer_count - 1))
-    min_dy = min(0, preset.layer_gap_y_px * max(0, layer_count - 1))
-    max_dy_signed = max(0, preset.layer_gap_y_px * max(0, layer_count - 1))
+    min_dx = min(0, layer_gap_x_px * max(0, layer_count - 1))
+    max_dx_signed = max(0, layer_gap_x_px * max(0, layer_count - 1))
+    min_dy = min(0, layer_gap_y_px * max(0, layer_count - 1))
+    max_dy_signed = max(0, layer_gap_y_px * max(0, layer_count - 1))
     envelope_w = target_w + max_dx_signed - min_dx
     envelope_h = target_h + max_dy_signed - min_dy
     base_x = (preset.width - envelope_w) // 2 - min_dx
@@ -278,12 +300,20 @@ def prepare_video_layers(layers, preset):
 
     prepared = []
     for position, layer in enumerate(layers):
+        source_image = layer["image"]
+        if view == "rear":
+            source_image = cv2.flip(source_image, 1)
+
         resized = _resize_bgra_premultiplied(
-            layer["image"],
+            source_image,
             (target_w, target_h),
             interpolation,
         )
-        step = layer_count - 1 - position
+        if view == "rear":
+            step = position
+        else:
+            step = layer_count - 1 - position
+
         side = _make_solid_bgra(
             resized[..., 3],
             color_bgr=(72, 61, 50),
@@ -301,9 +331,24 @@ def prepare_video_layers(layers, preset):
                 "step": step,
                 "base_x": base_x,
                 "base_y": base_y,
+                "layer_gap_x_px": layer_gap_x_px,
+                "layer_gap_y_px": layer_gap_y_px,
+                "view": view,
             }
         )
     return prepared
+
+
+def _layers_in_draw_order(prepared_layers):
+    if not prepared_layers:
+        return []
+
+    view = prepared_layers[0].get("view", "front")
+    if view == "rear":
+        return list(prepared_layers)
+
+    return list(reversed(prepared_layers))
+
 
 def render_exploded_frame(prepared_layers, preset, progress):
     preset = resolve_preset(preset)
@@ -320,15 +365,18 @@ def render_exploded_frame(prepared_layers, preset, progress):
         reverse=True,
     )
 
-    # The layer list is top -> bottom. Draw it bottom -> top.
-    for layer in reversed(prepared_layers):
+    for layer in _layers_in_draw_order(prepared_layers):
         x = int(round(
             layer["base_x"]
-            + layer["step"] * preset.layer_gap_x_px * progress
+            + layer["step"]
+            * layer.get("layer_gap_x_px", preset.layer_gap_x_px)
+            * progress
         ))
         y = int(round(
             layer["base_y"]
-            + layer["step"] * preset.layer_gap_y_px * progress
+            + layer["step"]
+            * layer.get("layer_gap_y_px", preset.layer_gap_y_px)
+            * progress
         ))
 
         shadow_scale = 0.35 + 0.65 * progress
@@ -352,18 +400,6 @@ def render_exploded_frame(prepared_layers, preset, progress):
 
     return frame
 
-def _ffmpeg_version(ffmpeg_path):
-    result = subprocess.run(
-        [ffmpeg_path, "-version"],
-        check=False,
-        capture_output=True,
-        text=True,
-    )
-    if result.returncode != 0:
-        return "unknown"
-
-    first_line = result.stdout.splitlines()
-    return first_line[0] if first_line else "unknown"
 
 def _ffmpeg_version(ffmpeg_path):
     result = subprocess.run(
@@ -470,6 +506,122 @@ def _encode_video(video_path, prepared_layers, preset, ffmpeg_path):
 
     os.replace(partial_path, video_path)
 
+
+def _output_paths(animation_dir, preset, view):
+    suffix = "" if view == "front" else "_rear"
+    stem = f"exploded_view_{preset.name}{suffix}"
+    return {
+        "video_path": os.path.join(animation_dir, f"{stem}.mp4"),
+        "poster_path": os.path.join(animation_dir, f"{stem}_poster.png"),
+        "metadata_path": os.path.join(
+            animation_dir,
+            f"{stem}_metadata.json",
+        ),
+    }
+
+
+def _render_single_view(
+    package_dir,
+    final_dir,
+    layers,
+    preset,
+    animation_dir,
+    view,
+    output_paths,
+    ffmpeg_path,
+    ffmpeg_version,
+):
+    prepared_layers = prepare_video_layers(layers, preset, view=view)
+
+    _encode_video(
+        video_path=output_paths["video_path"],
+        prepared_layers=prepared_layers,
+        preset=preset,
+        ffmpeg_path=ffmpeg_path,
+    )
+
+    poster = render_exploded_frame(
+        prepared_layers,
+        preset,
+        progress=1.0,
+    )
+    if not cv2.imwrite(output_paths["poster_path"], poster):
+        raise IOError(
+            "Could not write exploded-view poster: "
+            f'{output_paths["poster_path"]}'
+        )
+
+    draw_order = _layers_in_draw_order(prepared_layers)
+    layer_order_bottom_to_top = [
+        layer["name"] for layer in draw_order
+    ]
+    stationary_layer = min(
+        prepared_layers,
+        key=lambda layer: layer["step"],
+    )["name"]
+    farthest_moving_layer = max(
+        prepared_layers,
+        key=lambda layer: layer["step"],
+    )["name"]
+
+    metadata = {
+        "schema_version": 1,
+        "renderer": "preview_tools.exploded_video",
+        "view": view,
+        "preset": asdict(preset),
+        "source": {
+            "requested_path": os.fspath(package_dir),
+            "resolved_final_dir": final_dir,
+            "mirrored_horizontally": view == "rear",
+            "layer_order_bottom_to_top": (
+                layer_order_bottom_to_top
+            ),
+        },
+        "animation": {
+            "stationary_layer": stationary_layer,
+            "farthest_moving_layer": farthest_moving_layer,
+            "explosion_direction": (
+                "up-left" if view == "rear" else "up-right"
+            ),
+        },
+        "encoding": {
+            "codec": "H.264",
+            "pixel_format": "yuv420p",
+            "audio": False,
+            "ffmpeg": ffmpeg_version,
+        },
+        "outputs": {
+            "video": os.path.basename(output_paths["video_path"]),
+            "poster": os.path.basename(output_paths["poster_path"]),
+        },
+    }
+
+    with open(
+        output_paths["metadata_path"],
+        "w",
+        encoding="utf-8",
+    ) as handle:
+        json.dump(metadata, handle, indent=2)
+        handle.write("\n")
+
+    return {
+        "view": view,
+        "final_dir": final_dir,
+        "output_dir": animation_dir,
+        **output_paths,
+        "mirrored_horizontally": view == "rear",
+        "stationary_layer": stationary_layer,
+        "farthest_moving_layer": farthest_moving_layer,
+        "layer_order_bottom_to_top": (
+            layer_order_bottom_to_top
+        ),
+        "frame_count": preset.frame_count,
+        "duration_sec": preset.duration_sec,
+        "resolution": (preset.width, preset.height),
+        "fps": preset.fps,
+    }
+
+
 def render_exploded_video(
     package_dir,
     preset="etsy",
@@ -477,8 +629,10 @@ def render_exploded_video(
     background_color=None,
     force=False,
     ffmpeg_path=None,
+    view="front",
 ):
     preset = resolve_preset(preset)
+    view = resolve_view(view, allow_both=True)
 
     if background_color is not None:
         preset = replace(
@@ -488,29 +642,25 @@ def render_exploded_video(
 
     final_dir = resolve_final_dir(package_dir)
     layers = load_rgba_layers(final_dir)
-    prepared_layers = prepare_video_layers(layers, preset)
-
     animation_dir = os.path.abspath(
         output_dir
         or os.path.join(final_dir, "previews", "animation")
     )
     os.makedirs(animation_dir, exist_ok=True)
 
-    video_path = os.path.join(
-        animation_dir,
-        f"exploded_view_{preset.name}.mp4",
-    )
-    poster_path = os.path.join(
-        animation_dir,
-        f"exploded_view_{preset.name}_poster.png",
-    )
-    metadata_path = os.path.join(
-        animation_dir,
-        f"exploded_view_{preset.name}_metadata.json",
-    )
+    selected_views = VIDEO_VIEWS if view == "both" else (view,)
+    paths_by_view = {
+        selected_view: _output_paths(
+            animation_dir,
+            preset,
+            selected_view,
+        )
+        for selected_view in selected_views
+    }
 
-    for path in (video_path, poster_path, metadata_path):
-        ensure_writable_output(path, force)
+    for selected_view in selected_views:
+        for path in paths_by_view[selected_view].values():
+            ensure_writable_output(path, force)
 
     resolved_ffmpeg = ffmpeg_path or shutil.which("ffmpeg")
     if not resolved_ffmpeg:
@@ -519,68 +669,35 @@ def render_exploded_video(
             "with 'brew install ffmpeg', then rerun this command."
         )
 
-    _encode_video(
-        video_path=video_path,
-        prepared_layers=prepared_layers,
-        preset=preset,
-        ffmpeg_path=resolved_ffmpeg,
-    )
-
-    poster = render_exploded_frame(
-        prepared_layers,
-        preset,
-        progress=1.0,
-    )
-    if not cv2.imwrite(poster_path, poster):
-        raise IOError(
-            f"Could not write exploded-view poster: {poster_path}"
+    ffmpeg_version = _ffmpeg_version(resolved_ffmpeg)
+    results = {}
+    for selected_view in selected_views:
+        results[selected_view] = _render_single_view(
+            package_dir=package_dir,
+            final_dir=final_dir,
+            layers=layers,
+            preset=preset,
+            animation_dir=animation_dir,
+            view=selected_view,
+            output_paths=paths_by_view[selected_view],
+            ffmpeg_path=resolved_ffmpeg,
+            ffmpeg_version=ffmpeg_version,
         )
 
-    layer_order_bottom_to_top = [
-        layer["name"] for layer in reversed(prepared_layers)
-    ]
-
-    metadata = {
-        "schema_version": 1,
-        "renderer": "preview_tools.exploded_video",
-        "preset": asdict(preset),
-        "source": {
-            "requested_path": os.fspath(package_dir),
-            "resolved_final_dir": final_dir,
-            "layer_order_bottom_to_top": (
-                layer_order_bottom_to_top
-            ),
-        },
-        "encoding": {
-            "codec": "H.264",
-            "pixel_format": "yuv420p",
-            "audio": False,
-            "ffmpeg": _ffmpeg_version(resolved_ffmpeg),
-        },
-        "outputs": {
-            "video": os.path.basename(video_path),
-            "poster": os.path.basename(poster_path),
-        },
-    }
-
-    with open(metadata_path, "w", encoding="utf-8") as handle:
-        json.dump(metadata, handle, indent=2)
-        handle.write("\n")
+    if view != "both":
+        return results[view]
 
     return {
+        "view": "both",
         "final_dir": final_dir,
         "output_dir": animation_dir,
-        "video_path": video_path,
-        "poster_path": poster_path,
-        "metadata_path": metadata_path,
-        "layer_order_bottom_to_top": (
-            layer_order_bottom_to_top
-        ),
+        "views": results,
         "frame_count": preset.frame_count,
         "duration_sec": preset.duration_sec,
         "resolution": (preset.width, preset.height),
         "fps": preset.fps,
     }
+
 
 def _parse_background_color(value):
     text = value.strip()
@@ -638,6 +755,14 @@ def _build_argument_parser():
         help="Video preset to use. Default: etsy.",
     )
     parser.add_argument(
+        "--view",
+        choices=(*VIDEO_VIEWS, "both"),
+        default="front",
+        help=(
+            "View to render: front, rear, or both. Default: front."
+        ),
+    )
+    parser.add_argument(
         "--output-dir",
         help=(
             "Directory for the MP4, poster, and metadata. By default, "
@@ -668,6 +793,25 @@ def _build_argument_parser():
     return parser
 
 
+def _print_result(result, indent, heading=None):
+    if heading is not None:
+        print(f"{heading}:")
+
+    width, height = result["resolution"]
+    print(f'{indent}Video: {result["video_path"]}')
+    print(f'{indent}Poster: {result["poster_path"]}')
+    print(f'{indent}Metadata: {result["metadata_path"]}')
+    print(f'{indent}Layers: {len(result["layer_order_bottom_to_top"])}')
+    print(f"{indent}Resolution: {width}x{height}")
+    print(f'{indent}FPS: {result["fps"]}')
+    print(f'{indent}Frames: {result["frame_count"]}')
+    print(f'{indent}Duration: {result["duration_sec"]:.2f} seconds')
+    print(
+        f"{indent}Bottom-to-top order: "
+        + ", ".join(result["layer_order_bottom_to_top"])
+    )
+
+
 def main(argv=None):
     parser = _build_argument_parser()
     args = parser.parse_args(argv)
@@ -680,6 +824,7 @@ def main(argv=None):
             background_color=args.background_color,
             force=args.force,
             ffmpeg_path=args.ffmpeg_path,
+            view=args.view,
         )
     except (OSError, RuntimeError, ValueError) as exc:
         parser.exit(
@@ -687,21 +832,17 @@ def main(argv=None):
             message=f"error: {exc}\n",
         )
 
-    width, height = result["resolution"]
-
-    print("Exploded-view video created")
-    print(f'  Video: {result["video_path"]}')
-    print(f'  Poster: {result["poster_path"]}')
-    print(f'  Metadata: {result["metadata_path"]}')
-    print(f'  Layers: {len(result["layer_order_bottom_to_top"])}')
-    print(f'  Resolution: {width}x{height}')
-    print(f'  FPS: {result["fps"]}')
-    print(f'  Frames: {result["frame_count"]}')
-    print(f'  Duration: {result["duration_sec"]:.2f} seconds')
-    print(
-        "  Bottom-to-top order: "
-        + ", ".join(result["layer_order_bottom_to_top"])
-    )
+    if result["view"] == "both":
+        print("Exploded-view videos created")
+        for selected_view in VIDEO_VIEWS:
+            _print_result(
+                result["views"][selected_view],
+                indent="    ",
+                heading=f"  {selected_view.title()} view",
+            )
+    else:
+        print("Exploded-view video created")
+        _print_result(result, indent="  ")
     return 0
 
 
