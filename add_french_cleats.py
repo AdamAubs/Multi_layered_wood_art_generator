@@ -1,16 +1,19 @@
 import argparse
+from dataclasses import dataclass
+import json
 import os
 import re
 import subprocess
 import sys
-from dataclasses import dataclass
 
 import cv2
 import numpy as np
-import json
 
 
-LAYER_FILE_RE = re.compile(r"^Layer_(\d{2})_(.+)\.(png|dxf)$")
+LAYER_FILE_RE = re.compile(
+    r"^Layer_(\d{2})_(.+)\.(png|dxf)$",
+    re.IGNORECASE,
+)
 
 
 @dataclass
@@ -25,7 +28,14 @@ def parse_args():
     parser = argparse.ArgumentParser(
         description="Add a French cleat / keyhole feature to the back layers of a final package."
     )
-    parser.add_argument("--dir", default=".", help="Path to an output_final_* directory.")
+    parser.add_argument(
+        "--dir",
+        default=".",
+        help=(
+            "Path to a finalized layer directory, or to a run directory "
+            "containing outputs/final."
+        ),
+    )
     parser.add_argument(
         "--dry-run",
         action="store_true",
@@ -117,20 +127,44 @@ def parse_args():
     return parser.parse_args()
 
 
+def contains_layer_pngs(directory):
+    if not os.path.isdir(directory):
+        return False
+
+    for name in os.listdir(directory):
+        match = LAYER_FILE_RE.match(name)
+        if match and match.group(3).lower() == "png":
+            return True
+
+    return False
+
+
 def ensure_final_package(directory):
     abs_dir = os.path.abspath(directory)
     if not os.path.isdir(abs_dir):
         raise FileNotFoundError(f"Directory not found: {abs_dir}")
-    if not os.path.basename(abs_dir).startswith("output_final_"):
-        raise ValueError("French cleat adjustments only run on output_final_* packages.")
-    return abs_dir
+
+    candidates = [abs_dir]
+    if os.path.basename(abs_dir) == "outputs":
+        candidates.append(os.path.join(abs_dir, "final"))
+    candidates.append(os.path.join(abs_dir, "outputs", "final"))
+
+    for candidate in candidates:
+        if contains_layer_pngs(candidate):
+            return os.path.abspath(candidate)
+
+    raise ValueError(
+        "Could not find a finalized layer package. Pass either a directory "
+        "containing Layer_XX_*.png files or a run directory containing "
+        f"outputs/final: {abs_dir}"
+    )
 
 
 def load_layers(directory):
     layers = []
     for name in os.listdir(directory):
         match = LAYER_FILE_RE.match(name)
-        if not match or match.group(3) != "png":
+        if not match or match.group(3).lower() != "png":
             continue
         if match.group(2).startswith("french_cleat_"):
             continue
@@ -157,21 +191,38 @@ def load_image_mask(image_path):
     if img.ndim == 2:
         return (img > 0).astype(np.uint8)
     if img.ndim == 3:
+        if img.shape[2] == 4:
+            return (img[:, :, 3] > 0).astype(np.uint8)
         return (np.any(img > 0, axis=2)).astype(np.uint8)
     raise ValueError(f"Unsupported image shape for {image_path}: {img.shape}")
+
+
+def ensure_bgra(image):
+    if image.ndim == 2:
+        return cv2.cvtColor(image, cv2.COLOR_GRAY2BGRA)
+
+    if image.ndim != 3:
+        raise ValueError(f"Unsupported image shape: {image.shape}")
+
+    channels = image.shape[2]
+    if channels == 4:
+        return image.copy()
+    if channels == 3:
+        return cv2.cvtColor(image, cv2.COLOR_BGR2BGRA)
+    if channels == 1:
+        return cv2.cvtColor(image[:, :, 0], cv2.COLOR_GRAY2BGRA)
+
+    raise ValueError(
+        "Unsupported image channel count: "
+        f"expected 1, 3, or 4 channels, got {image.shape}"
+    )
 
 
 def load_color_image(image_path):
     img = cv2.imread(image_path, cv2.IMREAD_UNCHANGED)
     if img is None:
         raise FileNotFoundError(f"Could not read image: {image_path}")
-    if img.ndim == 2:
-        return cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
-    if img.ndim == 3:
-        if img.shape[2] == 4:
-            return cv2.cvtColor(img, cv2.COLOR_BGRA2BGR)
-        return img
-    raise ValueError(f"Unsupported image shape for {image_path}: {img.shape}")
+    return ensure_bgra(img)
 
 
 def build_keyhole_mask(shape, args):
@@ -247,6 +298,12 @@ def overlaps(layer_mask, proposal_mask, padding_px):
 
 
 def write_png(image, path):
+    if image.ndim != 3 or image.shape[2] != 4:
+        raise ValueError(
+            "French cleat layer images must be BGRA with 4 channels: "
+            f"{path} has shape {image.shape}"
+        )
+
     ok = cv2.imwrite(path, image)
     if not ok:
         raise OSError(f"Failed to write image: {path}")
@@ -379,14 +436,14 @@ def update_handoff(directory, added_layers, keyhole_layer, cavity_layer, args):
 
 def make_blank_layer(shape):
     height, width = shape
-    return np.zeros((height, width, 3), dtype=np.uint8)
+    image = np.zeros((height, width, 4), dtype=np.uint8)
+    image[:, :, 3] = 255
+    return image
 
 
 def overlay_white(image, mask):
-    result = image.copy()
-    if result.ndim == 2:
-        result = cv2.cvtColor(result, cv2.COLOR_GRAY2BGR)
-    result[mask > 0] = (255, 255, 255)
+    result = ensure_bgra(image)
+    result[mask > 0] = (255, 255, 255, 0)
     return result
 
 
