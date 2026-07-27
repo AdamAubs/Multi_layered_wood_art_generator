@@ -13,6 +13,7 @@ images/
 image_generator_tests/
 image_postprocessed_tests/
 image_gen_prompts/
+final_result_photo_gallery/
 
 output_final_*/
 output_postprocessed_*/
