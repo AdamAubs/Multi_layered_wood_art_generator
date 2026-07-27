@@ -1,3 +1,4 @@
+import argparse
 from dataclasses import asdict, dataclass, replace
 import json
 import os
@@ -580,3 +581,129 @@ def render_exploded_video(
         "resolution": (preset.width, preset.height),
         "fps": preset.fps,
     }
+
+def _parse_background_color(value):
+    text = value.strip()
+    message = (
+        "background color must be either #RRGGBB or R,G,B, "
+        "with every channel between 0 and 255"
+    )
+
+    if text.startswith("#"):
+        if len(text) != 7:
+            raise argparse.ArgumentTypeError(message)
+
+        try:
+            return tuple(
+                int(text[position : position + 2], 16)
+                for position in (1, 3, 5)
+            )
+        except ValueError as exc:
+            raise argparse.ArgumentTypeError(message) from exc
+
+    pieces = text.split(",")
+    if len(pieces) != 3:
+        raise argparse.ArgumentTypeError(message)
+
+    try:
+        rgb = tuple(int(piece.strip()) for piece in pieces)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(message) from exc
+
+    if any(channel < 0 or channel > 255 for channel in rgb):
+        raise argparse.ArgumentTypeError(message)
+
+    return rgb
+
+
+def _build_argument_parser():
+    parser = argparse.ArgumentParser(
+        prog="python -m preview_tools.exploded_video",
+        description=(
+            "Generate a 2.5D exploded-view MP4 from a finalized "
+            "multi-layer wood-art package."
+        ),
+    )
+    parser.add_argument(
+        "package_dir",
+        help=(
+            "Run directory containing outputs/final, or the final "
+            "directory containing Layer_*.png files."
+        ),
+    )
+    parser.add_argument(
+        "--preset",
+        choices=sorted(PRESETS),
+        default="etsy",
+        help="Video preset to use. Default: etsy.",
+    )
+    parser.add_argument(
+        "--output-dir",
+        help=(
+            "Directory for the MP4, poster, and metadata. By default, "
+            "they are written under outputs/final/previews/animation."
+        ),
+    )
+    parser.add_argument(
+        "--background-color",
+        type=_parse_background_color,
+        metavar="COLOR",
+        help=(
+            "Override the preset background using #RRGGBB or R,G,B."
+        ),
+    )
+    parser.add_argument(
+        "--ffmpeg",
+        dest="ffmpeg_path",
+        help=(
+            "Explicit FFmpeg executable path. By default, FFmpeg is "
+            "resolved from PATH."
+        ),
+    )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Replace existing video, poster, and metadata outputs.",
+    )
+    return parser
+
+
+def main(argv=None):
+    parser = _build_argument_parser()
+    args = parser.parse_args(argv)
+
+    try:
+        result = render_exploded_video(
+            package_dir=args.package_dir,
+            preset=args.preset,
+            output_dir=args.output_dir,
+            background_color=args.background_color,
+            force=args.force,
+            ffmpeg_path=args.ffmpeg_path,
+        )
+    except (OSError, RuntimeError, ValueError) as exc:
+        parser.exit(
+            status=1,
+            message=f"error: {exc}\n",
+        )
+
+    width, height = result["resolution"]
+
+    print("Exploded-view video created")
+    print(f'  Video: {result["video_path"]}')
+    print(f'  Poster: {result["poster_path"]}')
+    print(f'  Metadata: {result["metadata_path"]}')
+    print(f'  Layers: {len(result["layer_order_bottom_to_top"])}')
+    print(f'  Resolution: {width}x{height}')
+    print(f'  FPS: {result["fps"]}')
+    print(f'  Frames: {result["frame_count"]}')
+    print(f'  Duration: {result["duration_sec"]:.2f} seconds')
+    print(
+        "  Bottom-to-top order: "
+        + ", ".join(result["layer_order_bottom_to_top"])
+    )
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
