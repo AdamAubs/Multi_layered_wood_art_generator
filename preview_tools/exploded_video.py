@@ -1,10 +1,17 @@
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass, replace
+import json
 import os
+import shutil
+import subprocess
 
 import cv2
 import numpy as np
 
-from preview_tools.layer_composite import discover_layer_pngs
+from preview_tools.layer_composite import (
+    discover_layer_pngs,
+    ensure_writable_output,
+    load_rgba_layers,
+)
 
 @dataclass(frozen=True)
 class VideoPreset:
@@ -343,3 +350,233 @@ def render_exploded_frame(prepared_layers, preset, progress):
         _composite_bgra_over_bgr(frame, layer["image"], x, y)
 
     return frame
+
+def _ffmpeg_version(ffmpeg_path):
+    result = subprocess.run(
+        [ffmpeg_path, "-version"],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        return "unknown"
+
+    first_line = result.stdout.splitlines()
+    return first_line[0] if first_line else "unknown"
+
+def _ffmpeg_version(ffmpeg_path):
+    result = subprocess.run(
+        [ffmpeg_path, "-version"],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        return "unknown"
+
+    first_line = result.stdout.splitlines()
+    return first_line[0] if first_line else "unknown"
+
+
+def _encode_video(video_path, prepared_layers, preset, ffmpeg_path):
+    partial_path = f"{video_path}.partial.mp4"
+    if os.path.exists(partial_path):
+        os.remove(partial_path)
+
+    command = [
+        ffmpeg_path,
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-y",
+        "-f",
+        "rawvideo",
+        "-pix_fmt",
+        "bgr24",
+        "-s",
+        f"{preset.width}x{preset.height}",
+        "-r",
+        str(preset.fps),
+        "-i",
+        "-",
+        "-an",
+        "-c:v",
+        "libx264",
+        "-crf",
+        "18",
+        "-preset",
+        "medium",
+        "-pix_fmt",
+        "yuv420p",
+        "-movflags",
+        "+faststart",
+        partial_path,
+    ]
+
+    process = subprocess.Popen(
+        command,
+        stdin=subprocess.PIPE,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
+    )
+
+    stdin_pipe = process.stdin
+    stderr_pipe = process.stderr
+
+    if stdin_pipe is None or stderr_pipe is None:
+        process.kill()
+        process.wait()
+
+        if os.path.exists(partial_path):
+            os.remove(partial_path)
+
+        raise RuntimeError("FFmpeg stdin/stderr pipes were not created")
+
+    try:
+        for frame_index in range(preset.frame_count):
+            time_sec = frame_index / float(preset.fps)
+            progress = explosion_progress(time_sec, preset)
+            frame = render_exploded_frame(
+                prepared_layers,
+                preset,
+                progress,
+            )
+            stdin_pipe.write(frame.tobytes())
+
+        stdin_pipe.close()
+        stderr = stderr_pipe.read().decode(
+            "utf-8",
+            errors="replace",
+        )
+        return_code = process.wait()
+    except Exception:
+        process.kill()
+        process.wait()
+
+        if os.path.exists(partial_path):
+            os.remove(partial_path)
+
+        raise
+
+    if return_code != 0:
+        if os.path.exists(partial_path):
+            os.remove(partial_path)
+
+        raise RuntimeError(
+            f"FFmpeg failed with exit code {return_code}: "
+            f"{stderr.strip()}"
+        )
+
+    os.replace(partial_path, video_path)
+
+def render_exploded_video(
+    package_dir,
+    preset="etsy",
+    output_dir=None,
+    background_color=None,
+    force=False,
+    ffmpeg_path=None,
+):
+    preset = resolve_preset(preset)
+
+    if background_color is not None:
+        preset = replace(
+            preset,
+            background_rgb=tuple(background_color),
+        )
+
+    final_dir = resolve_final_dir(package_dir)
+    layers = load_rgba_layers(final_dir)
+    prepared_layers = prepare_video_layers(layers, preset)
+
+    animation_dir = os.path.abspath(
+        output_dir
+        or os.path.join(final_dir, "previews", "animation")
+    )
+    os.makedirs(animation_dir, exist_ok=True)
+
+    video_path = os.path.join(
+        animation_dir,
+        f"exploded_view_{preset.name}.mp4",
+    )
+    poster_path = os.path.join(
+        animation_dir,
+        f"exploded_view_{preset.name}_poster.png",
+    )
+    metadata_path = os.path.join(
+        animation_dir,
+        f"exploded_view_{preset.name}_metadata.json",
+    )
+
+    for path in (video_path, poster_path, metadata_path):
+        ensure_writable_output(path, force)
+
+    resolved_ffmpeg = ffmpeg_path or shutil.which("ffmpeg")
+    if not resolved_ffmpeg:
+        raise FileNotFoundError(
+            "FFmpeg was not found on PATH. On macOS, install it "
+            "with 'brew install ffmpeg', then rerun this command."
+        )
+
+    _encode_video(
+        video_path=video_path,
+        prepared_layers=prepared_layers,
+        preset=preset,
+        ffmpeg_path=resolved_ffmpeg,
+    )
+
+    poster = render_exploded_frame(
+        prepared_layers,
+        preset,
+        progress=1.0,
+    )
+    if not cv2.imwrite(poster_path, poster):
+        raise IOError(
+            f"Could not write exploded-view poster: {poster_path}"
+        )
+
+    layer_order_bottom_to_top = [
+        layer["name"] for layer in reversed(prepared_layers)
+    ]
+
+    metadata = {
+        "schema_version": 1,
+        "renderer": "preview_tools.exploded_video",
+        "preset": asdict(preset),
+        "source": {
+            "requested_path": os.fspath(package_dir),
+            "resolved_final_dir": final_dir,
+            "layer_order_bottom_to_top": (
+                layer_order_bottom_to_top
+            ),
+        },
+        "encoding": {
+            "codec": "H.264",
+            "pixel_format": "yuv420p",
+            "audio": False,
+            "ffmpeg": _ffmpeg_version(resolved_ffmpeg),
+        },
+        "outputs": {
+            "video": os.path.basename(video_path),
+            "poster": os.path.basename(poster_path),
+        },
+    }
+
+    with open(metadata_path, "w", encoding="utf-8") as handle:
+        json.dump(metadata, handle, indent=2)
+        handle.write("\n")
+
+    return {
+        "final_dir": final_dir,
+        "output_dir": animation_dir,
+        "video_path": video_path,
+        "poster_path": poster_path,
+        "metadata_path": metadata_path,
+        "layer_order_bottom_to_top": (
+            layer_order_bottom_to_top
+        ),
+        "frame_count": preset.frame_count,
+        "duration_sec": preset.duration_sec,
+        "resolution": (preset.width, preset.height),
+        "fps": preset.fps,
+    }
