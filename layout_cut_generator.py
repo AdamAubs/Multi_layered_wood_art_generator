@@ -269,7 +269,6 @@ def main():
             if added is None:
                 added = 0
             sheet_meta['placements'].append({'file': os.path.basename(part['path']), 'x_mm': px, 'y_mm': py, 'w_mm': part['w'], 'h_mm': part['h'], 'entities_added': added})
-            sheet_meta['placements'].append({'file': os.path.basename(part['path']), 'x_mm': px, 'y_mm': py, 'w_mm': part['w'], 'h_mm': part['h']})
 
         if len(sheets) == 1:
             out_name = args.output_name
