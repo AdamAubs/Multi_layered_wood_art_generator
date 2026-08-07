@@ -98,7 +98,7 @@ def parse_args():
     parser.add_argument(
         "--frame-margin-mm",
         type=float,
-        default=15.0,
+        default=5.0,
         help="Frame margin passed through to DXF regeneration.",
     )
     parser.add_argument(
@@ -110,7 +110,7 @@ def parse_args():
     parser.add_argument(
         "--setting-hole-inset-mm",
         type=float,
-        default=10.0,
+        default=7.0,
         help="Setting-hole inset passed through to DXF regeneration.",
     )
     parser.add_argument(

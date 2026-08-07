@@ -115,7 +115,7 @@ def parse_args():
     parser.add_argument(
         "--dxf-frame-margin-mm",
         type=float,
-        default=15.0,
+        default=5.0,
         help="Extra margin in mm between the artwork contour and the outer frame.",
     )
     parser.add_argument(
@@ -127,7 +127,7 @@ def parse_args():
     parser.add_argument(
         "--dxf-setting-hole-inset-mm",
         type=float,
-        default=10.0,
+        default=7.0,
         help="Inset in mm from each outer frame corner to the hole center.",
     )
     parser.add_argument(
