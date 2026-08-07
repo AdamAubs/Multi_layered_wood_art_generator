@@ -240,6 +240,31 @@ What it does:
 
 Safety tip: start with `--dry-run` so you can see whether the tool will use existing layers or append new back layers before it writes anything.
 
+## Exploded video tool
+
+Rear exploded view
+
+```bash
+python -m preview_tools.exploded_video \
+  "LazyLayerzzzLibrary/projects/<project-name>/runs/<your-run>" \
+  --preset etsy \
+  --view rear
+```
+
+Front exploded view
+
+```bash
+python -m py_compile preview_tools/exploded_video.py
+git diff --check
+```
+
+```bash
+python -m preview_tools.exploded_video \
+  "LazyLayerzzzLibrary/projects/jubilee-prod-draft/runs/run-20260726-008" \
+  --preset etsy \
+  --view front
+```
+
 **DXF converter differences**
 
 - `--export-dxf` (postprocessor internal): uses the postprocessor's in-memory masks and the `export_dxf()` routine. It converts binary masks to vector contours via `mask_to_contours()` and writes polylines directly into a DXF. This path builds the DXF geometry from the masks in memory and allows layouting multiple layers into a single DXF file.
