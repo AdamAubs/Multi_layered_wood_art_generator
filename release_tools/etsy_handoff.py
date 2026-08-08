@@ -32,7 +32,7 @@ outside_dimensions_mm: [{width_mm:.3f}, {height_mm:.3f}]
 outside_dimensions_inches: [{width_mm * INCHES_PER_MM:.3f}, {height_mm * INCHES_PER_MM:.3f}]
 source_png_pixels: [{facts.source_pixels[0]}, {facts.source_pixels[1]}]
 recorded_dpi: {facts.dpi if facts.dpi else 'unknown'}
-stock_layout_size_inches: {facts.stock_size_in or 'not included'}
+combined_layout: one DXF and one matching SVG containing every delivered layer in a neat 10 mm-spaced grid
 french_cleats_included: {'yes' if facts.cleat_layers else 'no'}
 license_limit: 100 finished physical products
 ```
@@ -73,5 +73,5 @@ Do not claim personalized, editable, commercial use, tested compatibility, or in
 
 Produce all of these sections: Publish status (`READY`, `READY AFTER LISTED FIXES`, or `DO NOT PUBLISH YET`) with reasons; verified product summary; one suggested title plus up to two alternatives with character and word counts; a paste-ready description beginning `DIGITAL DOWNLOAD ONLY`; 13 validated tags; category and attributes; price, quantity, SKU, and shop section; listing-media order; image alt text; video plan; digital-download disclosures; AI disclosure; intellectual-property review; upload checklist; and final pre-publish checklist.
 
-The finished description must explain per-layer DXF/SVG geometry, optional cut layouts, PNG references, assembly images, dimensions/scaling, visible versus mounting layers, tested facts only, exclusions, fixed-text/personalization limits, the 100-finished-product license, and accurate AI/IP disclosures. Do not invent refund or shop policies.
+The finished description must explain per-layer DXF/SVG geometry, the 10 mm-spaced combined all-layer DXF/SVG reference, PNG references, assembly images, dimensions/scaling, visible versus mounting layers, tested facts only, exclusions, fixed-text/personalization limits, the 100-finished-product license, and accurate AI/IP disclosures. Do not invent refund or shop policies.
 """, encoding="utf-8")

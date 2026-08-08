@@ -10,6 +10,7 @@ import ezdxf
 import numpy as np
 
 from release_tools.run_facts import ReleaseValidationError, discover_release_facts
+from release_tools.etsy_release import _write_combined_layout
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -63,6 +64,28 @@ class LayoutMetadataTests(unittest.TestCase):
             metadata = json.loads((final_dir / "layout-cut-generator_metadata.json").read_text(encoding="utf-8"))
             placements = [placement for sheet in metadata["sheets"] for placement in sheet["placements"]]
             self.assertEqual([placement["file"] for placement in placements], ["Layer_00_top.dxf", "Layer_01_bottom.dxf"])
+
+
+class CombinedLayoutTests(unittest.TestCase):
+    def test_combined_layout_contains_all_selected_layer_geometry(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            final_dir = Path(temporary) / "final"
+            package_dir = Path(temporary) / "buyer"
+            final_dir.mkdir()
+            package_dir.mkdir()
+            write_layer(final_dir, 0, "top")
+            write_layer(final_dir, 1, "bottom")
+            facts = discover_release_facts(final_dir)
+            _write_combined_layout(facts, package_dir)
+            layout_dir = package_dir / "Combined_Layout"
+            combined = ezdxf.readfile(layout_dir / "All_Layers_Layout.dxf")
+            self.assertEqual(combined.header["$INSUNITS"], 4)
+            self.assertEqual(len(combined.modelspace()), 2)
+            polylines = list(combined.modelspace().query("LWPOLYLINE"))
+            first_bbox = [value for point in polylines[0].get_points() for value in point[:2]]
+            second_bbox = [value for point in polylines[1].get_points() for value in point[:2]]
+            self.assertGreaterEqual(min(second_bbox[::2]) - max(first_bbox[::2]), 10.0)
+            self.assertTrue((layout_dir / "All_Layers_Layout.svg").is_file())
 
 
 if __name__ == "__main__":
