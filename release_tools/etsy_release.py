@@ -20,7 +20,10 @@ from release_tools.archive import ETSY_MAX_BYTES, ETSY_MAX_FILES, ETSY_POLICY_UR
 from release_tools.buyer_docs import write_buyer_documents, write_manifest
 from release_tools.dxf_to_svg import dxf_to_svg, validate_matching_canvases
 from release_tools.etsy_handoff import write_etsy_handoff
-from release_tools.run_facts import CLEAT_LABELS, ReleaseFacts, ReleaseValidationError, discover_release_facts, hash_tree
+from release_tools.run_facts import ReleaseFacts, ReleaseValidationError, discover_release_facts, hash_tree
+
+
+COMBINED_LAYOUT_STEM = "All_Layers_Layout"
 
 
 def build_release(
@@ -29,7 +32,6 @@ def build_release(
     product_name: str | None = None,
     release_version: str = "v1.0",
     french_cleats: str = "ask",
-    stock_size_in: str | None = None,
     background_color: tuple[int, int, int] | None = None,
     ffmpeg_path: str | None = None,
     dry_run: bool = False,
@@ -41,14 +43,13 @@ def build_release(
     product_name = product_name or _default_product_name(facts)
     safe_name = _safe_name(product_name)
     release_version = _safe_name(release_version)
-    selected_stock = stock_size_in or facts.stock_size_in
     destination = facts.source_final / "EtsyRelease"
     plan = {
         "source_final": "outputs/final",
         "product_name": product_name,
         "layers": [layer.stem for layer in facts.layers if cleat_mode == "include" or not layer.is_cleat],
         "french_cleats": cleat_mode,
-        "stock_size_in": selected_stock,
+        "combined_layout": f"{COMBINED_LAYOUT_STEM}.dxf and {COMBINED_LAYOUT_STEM}.svg (10 mm-spaced grid)",
         "destination": "outputs/final/EtsyRelease",
         "media": ["composite", "showcase", "front exploded video", "rear exploded video"],
     }
@@ -71,28 +72,25 @@ def build_release(
             raise ReleaseValidationError("French-cleat exclusion left mounting layers in staging.")
         if cleat_mode == "include" and not staged_facts.has_valid_cleats:
             raise ReleaseValidationError("French-cleat inclusion did not produce the required three final layers.")
-        layout_paths = _generate_layouts(staged_final, selected_stock, log_lines)
-        _validate_layout_placements(staged_final, staged_facts, layout_paths)
         release_root.mkdir()
         buyer_root = release_root / "Buyer_Download"
         package_dir = buyer_root / f"{safe_name}_{release_version}"
         package_dir.mkdir(parents=True)
         _copy_buyer_layers(staged_facts, package_dir)
         _write_layer_svgs(staged_facts, package_dir)
-        if layout_paths:
-            _copy_layouts(layout_paths, package_dir)
+        _write_combined_layout(staged_facts, package_dir)
         seller_media = release_root / "Seller_Listing_Media"
         media = _render_media(staged_final, seller_media, background_color, ffmpeg_path)
         _copy_assembly_references(media, package_dir)
-        write_buyer_documents(package_dir, staged_facts, release_version, layouts_present=bool(layout_paths))
-        write_manifest(package_dir, staged_facts, release_version, selected_stock if layout_paths else None)
+        write_buyer_documents(package_dir, staged_facts, release_version)
+        write_manifest(package_dir, staged_facts, release_version)
         archive_details = create_buyer_archives(buyer_root, package_dir, f"{safe_name}_{release_version}")
         write_upload_instructions(buyer_root / "ETSY_UPLOAD_FILES.txt", archive_details)
         handoff_path = release_root / "ETSY_HANDOFF.md"
         write_etsy_handoff(handoff_path, staged_facts, product_name, release_version, [detail.__dict__ for detail in archive_details])
-        metadata = _metadata(staged_facts, product_name, release_version, selected_stock, archive_details, layout_paths, media)
+        metadata = _metadata(staged_facts, product_name, release_version, archive_details, media)
         _write_json(release_root / "etsy_release_metadata.json", metadata)
-        _write_json(release_root / "validation_report.json", {"source_hashes_unchanged": True, "svg_layers": len(staged_facts.layers), "layouts": len(layout_paths), "buyer_archives": len(archive_details)})
+        _write_json(release_root / "validation_report.json", {"source_hashes_unchanged": True, "svg_layers": len(staged_facts.layers), "combined_layout": True, "buyer_archives": len(archive_details)})
         (release_root / "release.log").write_text("\n\n".join(log_lines) + "\n", encoding="utf-8")
         if hash_tree(facts.source_final, {"EtsyRelease", staging_root.name}) != source_hashes:
             raise ReleaseValidationError("Source final files changed during the release build; refusing to publish release.")
@@ -119,7 +117,7 @@ def _copy_staged_sources(facts: ReleaseFacts, staged_final: Path, *, include_exi
             continue
         shutil.copy2(layer.png_path, staged_final / layer.png_path.name)
         shutil.copy2(layer.dxf_path, staged_final / layer.dxf_path.name)
-    for name in ("handoff.md", "run_metadata.json", "layout-cut-generator_metadata.json"):
+    for name in ("handoff.md", "run_metadata.json"):
         source = facts.source_final / name
         if source.is_file():
             shutil.copy2(source, staged_final / name)
@@ -138,33 +136,6 @@ def _add_cleats(staged_final: Path, log_lines: list[str]) -> None:
         raise ReleaseValidationError("French-cleat generation failed; see release log.")
 
 
-def _generate_layouts(staged_final: Path, stock_size_in: str | None, log_lines: list[str]) -> list[Path]:
-    if not stock_size_in:
-        log_lines.append("No stock size was available; omitted cut layouts.")
-        return []
-    root = Path(__file__).resolve().parents[1]
-    sizes = [stock_size_in]
-    match = re.fullmatch(r"\s*(\d+(?:\.\d+)?)\s*[xX]\s*(\d+(?:\.\d+)?)\s*", stock_size_in)
-    if match and match.group(1) != match.group(2):
-        sizes.append(f"{match.group(2)}x{match.group(1)}")
-    result = None
-    for position, size in enumerate(sizes):
-        command = [sys.executable, str(root / "layout_cut_generator.py"), "--dir", str(staged_final), "--stock-size-in", size]
-        result = subprocess.run(command, cwd=root, text=True, capture_output=True)
-        log_lines.append(f"Layout generation ({size}):\n" + result.stdout + result.stderr)
-        if not result.returncode:
-            if position:
-                log_lines.append(f"Used equivalent swapped stock orientation {size} for configured {stock_size_in} stock.")
-            break
-    assert result is not None
-    if result.returncode:
-        raise ReleaseValidationError("Layout generation failed; see release log.")
-    paths = sorted(path for path in staged_final.glob("layout-cut-generator*.dxf") if re.fullmatch(r"layout-cut-generator(?:_\d{2})?\.dxf", path.name))
-    if not paths:
-        raise ReleaseValidationError("Configured stock layout generation produced no official layout DXF.")
-    return paths
-
-
 def _copy_buyer_layers(facts: ReleaseFacts, package_dir: Path) -> None:
     dxf_dir, png_dir = package_dir / "DXF_Layers", package_dir / "PNG_References" / "Layers"
     dxf_dir.mkdir(parents=True)
@@ -172,20 +143,6 @@ def _copy_buyer_layers(facts: ReleaseFacts, package_dir: Path) -> None:
     for layer in facts.layers:
         shutil.copy2(layer.dxf_path, dxf_dir / layer.dxf_path.name)
         shutil.copy2(layer.png_path, png_dir / layer.png_path.name)
-
-
-def _validate_layout_placements(staged_final: Path, facts: ReleaseFacts, layout_paths: list[Path]) -> None:
-    if not layout_paths:
-        return
-    metadata_path = staged_final / "layout-cut-generator_metadata.json"
-    try:
-        metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
-        placements = [placement["file"] for sheet in metadata["sheets"] for placement in sheet["placements"]]
-    except (OSError, KeyError, TypeError, json.JSONDecodeError) as exc:
-        raise ReleaseValidationError("Generated layout metadata is unreadable.") from exc
-    expected = [layer.dxf_path.name for layer in facts.layers]
-    if sorted(placements) != sorted(expected) or len(placements) != len(expected):
-        raise ReleaseValidationError("Generated layouts must place every delivered canonical layer DXF exactly once.")
 
 
 def _write_layer_svgs(facts: ReleaseFacts, package_dir: Path) -> None:
@@ -199,13 +156,52 @@ def _write_layer_svgs(facts: ReleaseFacts, package_dir: Path) -> None:
     validate_matching_canvases(outputs)
 
 
-def _copy_layouts(paths: list[Path], package_dir: Path) -> None:
-    dxf_dir, svg_dir = package_dir / "Cut_Layouts" / "DXF", package_dir / "Cut_Layouts" / "SVG"
-    dxf_dir.mkdir(parents=True)
-    svg_dir.mkdir(parents=True)
-    for path in paths:
-        shutil.copy2(path, dxf_dir / path.name)
-        dxf_to_svg(path, svg_dir / f"{path.stem}.svg")
+def _write_combined_layout(facts: ReleaseFacts, package_dir: Path) -> None:
+    import ezdxf
+    from ezdxf.addons import Importer
+    from ezdxf import bbox
+
+    layout_dir = package_dir / "Combined_Layout"
+    layout_dir.mkdir()
+    combined_dxf = layout_dir / f"{COMBINED_LAYOUT_STEM}.dxf"
+    combined_doc = ezdxf.new("R2010")
+    combined_doc.header["$INSUNITS"] = 4
+    gap_mm = 10.0
+    columns = 2
+    extents = []
+    for layer in facts.layers:
+        source_doc = ezdxf.readfile(layer.dxf_path)
+        source_extents = bbox.extents(source_doc.modelspace(), fast=False)
+        if not source_extents.has_data:
+            raise ReleaseValidationError(f"Cannot place empty layer in combined layout: {layer.dxf_path.name}")
+        extents.append(source_extents)
+    cell_width = max(float(extent.extmax.x - extent.extmin.x) for extent in extents)
+    cell_height = max(float(extent.extmax.y - extent.extmin.y) for extent in extents)
+    for position, (layer, source_extents) in enumerate(zip(facts.layers, extents)):
+        source_doc = ezdxf.readfile(layer.dxf_path)
+        importer = Importer(source_doc, combined_doc)
+        importer.import_modelspace()
+        importer.finalize()
+        column, row = position % columns, position // columns
+        offset_x = column * (cell_width + gap_mm) - float(source_extents.extmin.x)
+        offset_y = row * (cell_height + gap_mm) - float(source_extents.extmin.y)
+        imported_entities = list(combined_doc.modelspace())[-len(source_doc.modelspace()):]
+        for entity in imported_entities:
+            try:
+                entity.translate(offset_x, offset_y, 0)
+            except (AttributeError, TypeError) as exc:
+                raise ReleaseValidationError(f"Cannot position {entity.dxftype()} in the combined layout.") from exc
+    combined_doc.saveas(combined_dxf)
+    _validate_combined_layout(combined_dxf, len(facts.layers))
+    dxf_to_svg(combined_dxf, layout_dir / f"{COMBINED_LAYOUT_STEM}.svg")
+
+
+def _validate_combined_layout(path: Path, layer_count: int) -> None:
+    import ezdxf
+
+    document = ezdxf.readfile(path)
+    if document.header.get("$INSUNITS", 0) != 4 or len(document.modelspace()) < layer_count:
+        raise ReleaseValidationError("Combined layout is missing modelspace geometry or millimeter units.")
 
 
 def _render_media(staged_final: Path, seller_media: Path, background_color: tuple[int, int, int] | None, ffmpeg_path: str | None) -> dict[str, Any]:
@@ -226,20 +222,20 @@ def _copy_assembly_references(media: dict[str, Any], package_dir: Path) -> None:
     shutil.copy2(views["rear"]["poster_path"], assembly / "exploded_rear.png")
 
 
-def _metadata(facts: ReleaseFacts, product_name: str, release_version: str, stock_size: str | None, archives: list[Any], layouts: list[Path], media: dict[str, Any]) -> dict[str, Any]:
+def _metadata(facts: ReleaseFacts, product_name: str, release_version: str, archives: list[Any], media: dict[str, Any]) -> dict[str, Any]:
     return {
         "schema_version": 1,
         "tool": "release_tools.etsy_release",
         "created_at": datetime.now(timezone.utc).isoformat(),
         "source": facts.public_dict(),
-        "selection": {"visible_art_layers": len(facts.art_layers), "mounting_layers": len(facts.cleat_layers), "total_layers": len(facts.layers), "stock_size_in": stock_size},
+        "selection": {"visible_art_layers": len(facts.art_layers), "mounting_layers": len(facts.cleat_layers), "total_layers": len(facts.layers), "combined_layout": f"{COMBINED_LAYOUT_STEM}.dxf and {COMBINED_LAYOUT_STEM}.svg (10 mm-spaced grid)"},
         "dimensions": {"mm": facts.dimensions_mm, "source_png_pixels": facts.source_pixels, "dpi": facts.dpi},
         "buyer_files": [detail.__dict__ for detail in archives],
         "seller_media": {"animation_duration_sec": media["animation"]["duration_sec"], "animation_resolution": media["animation"]["resolution"]},
         "license": {"physical_product_limit": 100},
         "etsy_policy": {"max_files": ETSY_MAX_FILES, "max_bytes_per_file": ETSY_MAX_BYTES, "source_url": ETSY_POLICY_URL, "verified_on": ETSY_POLICY_VERIFIED_ON},
         "warnings": list(facts.warnings),
-        "validation": {"layout_sheets": len(layouts), "release_name": product_name, "release_version": release_version},
+        "validation": {"combined_layout": True, "release_name": product_name, "release_version": release_version},
     }
 
 
@@ -302,7 +298,6 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--product-name")
     parser.add_argument("--release-version", default="v1.0")
     parser.add_argument("--french-cleats", choices=("ask", "include", "exclude"), default="ask")
-    parser.add_argument("--stock-size-in")
     parser.add_argument("--background-color", type=_parse_color)
     parser.add_argument("--ffmpeg")
     parser.add_argument("--dry-run", action="store_true")
@@ -314,7 +309,7 @@ def _parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     try:
-        result = build_release(args.run_or_final, product_name=args.product_name, release_version=args.release_version, french_cleats=args.french_cleats, stock_size_in=args.stock_size_in, background_color=args.background_color, ffmpeg_path=args.ffmpeg, dry_run=args.dry_run, force=args.force, keep_staging=args.keep_staging)
+        result = build_release(args.run_or_final, product_name=args.product_name, release_version=args.release_version, french_cleats=args.french_cleats, background_color=args.background_color, ffmpeg_path=args.ffmpeg, dry_run=args.dry_run, force=args.force, keep_staging=args.keep_staging)
     except (OSError, RuntimeError, ReleaseValidationError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1

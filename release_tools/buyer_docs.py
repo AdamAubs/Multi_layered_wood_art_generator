@@ -19,12 +19,12 @@ For an extended license, contact the Etsy seller.
 """
 
 
-def write_buyer_documents(package_dir: Path, facts: ReleaseFacts, release_version: str, *, layouts_present: bool) -> None:
-    package_dir.joinpath("READ_ME_FIRST.txt").write_text(_readme(facts, release_version, layouts_present), encoding="utf-8")
+def write_buyer_documents(package_dir: Path, facts: ReleaseFacts, release_version: str) -> None:
+    package_dir.joinpath("READ_ME_FIRST.txt").write_text(_readme(facts, release_version), encoding="utf-8")
     package_dir.joinpath("LICENSE.txt").write_text(LICENSE_TEXT, encoding="utf-8")
 
 
-def write_manifest(package_dir: Path, facts: ReleaseFacts, release_version: str, stock_size_in: str | None) -> None:
+def write_manifest(package_dir: Path, facts: ReleaseFacts, release_version: str) -> None:
     entries = []
     for path in sorted(package_dir.rglob("*")):
         if path.is_file() and path.name != "FILE_MANIFEST.txt":
@@ -41,7 +41,7 @@ def write_manifest(package_dir: Path, facts: ReleaseFacts, release_version: str,
         f"Outside dimensions: {width_mm:.3f} x {height_mm:.3f} mm ({width_mm * INCHES_PER_MM:.3f} x {height_mm * INCHES_PER_MM:.3f} in)",
         "Units: millimeters",
         f"French-cleat layers included: {'yes' if facts.cleat_layers else 'no'}",
-        f"Layout stock size: {stock_size_in or 'not included'}",
+        "Combined layout: one DXF and one matching SVG with every delivered layer in a neat 10 mm-spaced grid",
         "",
         "relative path | bytes | SHA-256 | purpose",
         *entries,
@@ -50,13 +50,9 @@ def write_manifest(package_dir: Path, facts: ReleaseFacts, release_version: str,
     package_dir.joinpath("FILE_MANIFEST.txt").write_text("\n".join(header), encoding="utf-8")
 
 
-def _readme(facts: ReleaseFacts, release_version: str, layouts_present: bool) -> str:
+def _readme(facts: ReleaseFacts, release_version: str) -> str:
     width_mm, height_mm = facts.dimensions_mm
     width_in, height_in = width_mm * INCHES_PER_MM, height_mm * INCHES_PER_MM
-    layout_text = (
-        f"Cut_Layouts contains optional prearranged stock-sheet DXF and SVG files for {facts.stock_size_in} inch stock. Verify each layout against your own material before cutting."
-        if layouts_present else "Cut layouts are not included because no verified stock size was available."
-    )
     material = "Material and thickness are not specified for this release."
     return f"""READ ME FIRST - {release_version}
 
@@ -65,7 +61,7 @@ This is a DIGITAL DOWNLOAD. No physical item is shipped.
 WHAT IS INCLUDED
 DXF_Layers contains one full-size, aligned cutting file per numbered layer.
 SVG_Layers contains the same per-layer geometry and scale for software that prefers SVG.
-{layout_text}
+Combined_Layout contains one full-size DXF and matching SVG with all delivered layers arranged in a neat grid with 10 mm gaps. Use the individual layer files for cutting; the combined layout is a convenient complete-design reference, not a prearranged stock-sheet file.
 PNG_References/Layers contains visual references only; PNGs are not the preferred cutting source.
 Assembly_References contains assembled and exploded images to understand order and orientation. They are not dimensioned cutting files.
 
@@ -92,8 +88,8 @@ def _purpose(relative: str) -> str:
         return "full-size layer cutting DXF"
     if relative.startswith("SVG_Layers/"):
         return "full-size layer cutting SVG"
-    if relative.startswith("Cut_Layouts/"):
-        return "optional stock-sheet layout"
+    if relative.startswith("Combined_Layout/"):
+        return "all-layer combined layout"
     if relative.startswith("PNG_References/"):
         return "visual layer reference"
     if relative.startswith("Assembly_References/"):

@@ -240,6 +240,37 @@ What it does:
 
 Safety tip: start with `--dry-run` so you can see whether the tool will use existing layers or append new back layers before it writes anything.
 
+## Etsy Release Handoff
+
+Package a completed LazyLayerzzzLibrary run into a buyer-ready Etsy download, seller-only listing media, and a run-specific AI handoff. The release tool stages its work privately and leaves the existing `outputs/final` source files unchanged.
+
+```bash
+python -m release_tools.etsy_release \
+	"LazyLayerzzzLibrary/projects/<project-name>/runs/<run-id>" \
+	--french-cleats include
+```
+
+Use `--french-cleats exclude` for an art-only release. The default `ask` mode prompts for the choice in an interactive terminal. Add `--force` only when replacing an existing `outputs/final/EtsyRelease` build.
+
+The completed release is written to:
+
+```text
+LazyLayerzzzLibrary/projects/<project-name>/runs/<run-id>/outputs/final/EtsyRelease/
+```
+
+The buyer ZIP is in `Buyer_Download/`. Seller-only composite, showcase, and exploded-video media are in `Seller_Listing_Media/`. The buyer package contains individual DXF/SVG layers plus `Combined_Layout/All_Layers_Layout.dxf` and `.svg`, where every delivered layer is arranged in a neat grid with 10 mm gaps.
+
+### Create The Listing Guide
+
+Open `EtsyRelease/ETSY_HANDOFF.md` and provide its complete contents to the AI helping with your listing. Before asking it to write `ETSY_LISTING_GUIDE.md`, provide the required seller answers, including:
+
+- Photos you took of the completed physical artwork, and confirmation that it was cut from this release's delivered files.
+- The machine, material, thickness, finished size, and any production changes used for the physical piece.
+- Original design or presentation reference images, which images may be used publicly, and the intended showcase mood, environment, and lighting.
+- Confirmed compatibility, pricing, AI disclosure, and intellectual-property information.
+
+The handoff directs the AI to use your physical photos as fabrication evidence, create reference-driven showcase-image briefs with bright, intentional lighting, and avoid unsupported production or compatibility claims.
+
 ## Exploded video tool
 
 Rear exploded view

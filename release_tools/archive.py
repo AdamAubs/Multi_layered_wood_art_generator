@@ -32,7 +32,7 @@ def create_buyer_archives(buyer_root: Path, package_dir: Path, archive_stem: str
         return [_detail(all_archive)]
     all_archive.unlink()
     shared = [path for path in files if path.name in {"READ_ME_FIRST.txt", "LICENSE.txt", "FILE_MANIFEST.txt"}]
-    vectors = [path for path in files if path.parts[-2] in {"DXF_Layers", "SVG_Layers"} or "Cut_Layouts" in path.parts]
+    vectors = [path for path in files if path.parts[-2] in {"DXF_Layers", "SVG_Layers"} or "Combined_Layout" in path.parts]
     references = [path for path in files if path not in vectors and path not in shared]
     groups = [("Vectors", shared + vectors), ("References", shared + references)]
     details: list[ArchiveDetail] = []
@@ -64,7 +64,7 @@ def _write_zip(destination: Path, root: Path, files: list[Path]) -> None:
 
 
 def _validate_buyer_tree(package_dir: Path) -> None:
-    allowed_top = {"DXF_Layers", "SVG_Layers", "Cut_Layouts", "PNG_References", "Assembly_References", "READ_ME_FIRST.txt", "LICENSE.txt", "FILE_MANIFEST.txt"}
+    allowed_top = {"DXF_Layers", "SVG_Layers", "Combined_Layout", "PNG_References", "Assembly_References", "READ_ME_FIRST.txt", "LICENSE.txt", "FILE_MANIFEST.txt"}
     for path in package_dir.rglob("*"):
         if path.is_symlink():
             raise ReleaseValidationError(f"Buyer tree may not contain symlinks: {path.name}")
