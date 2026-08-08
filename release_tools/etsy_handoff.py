@@ -47,11 +47,11 @@ Buyer ZIP files:
 Metadata conflicts or missing facts:
 {warnings}
 
-Seller media includes composite images, showcase images, and front/rear Etsy exploded MP4s with posters when the release completed successfully.
+Seller media includes composite images, showcase images, and front/rear Etsy exploded MP4s with posters when the release completed successfully. Add your completed-artwork photos to `Seller_Listing_Media/Physical_Artwork_Photos/`; this folder is seller-only and is not included in the buyer ZIP.
 
 ## Physical Fabrication Evidence
 
-The seller will provide photos they took of the completed physical artwork. Ask the seller to confirm that the pictured artwork was cut from this release's delivered files, identify the machine, material, thickness, and any relevant production changes, and identify which photos may be used in the listing. Treat the photos and the seller's confirmation as evidence that this design was physically fabricated, rather than merely generated digitally. Do not claim a production test, machine compatibility, material compatibility, or exact fabrication result until the seller confirms those facts.
+The seller will provide photos they took of the completed physical artwork. Ask the seller to add them to `Seller_Listing_Media/Physical_Artwork_Photos/`, confirm that the pictured artwork was cut from this release's delivered files, identify the machine, material, thickness, and any relevant production changes, and identify which photos may be used in the listing. Treat the photos and the seller's confirmation as evidence that this design was physically fabricated, rather than merely generated digitally. Do not claim a production test, machine compatibility, material compatibility, or exact fabrication result until the seller confirms those facts.
 
 ## Reference-Driven Showcase Images
 

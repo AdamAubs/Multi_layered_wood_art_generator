@@ -206,11 +206,18 @@ def _validate_combined_layout(path: Path, layer_count: int) -> None:
 
 def _render_media(staged_final: Path, seller_media: Path, background_color: tuple[int, int, int] | None, ffmpeg_path: str | None) -> dict[str, Any]:
     seller_media.mkdir(parents=True)
+    physical_images_dir = seller_media / "Physical_Artwork_Photos"
+    physical_images_dir.mkdir()
     color = background_color or (245, 242, 236)
     composite = render_composite_previews(str(staged_final), output_dir=str(seller_media), background_color=color, force=True)
     showcase = render_showcase_previews(str(staged_final), output_dir=str(seller_media / "showcase"), background_color=color, force=True)
     animation = render_exploded_video(str(staged_final), preset="etsy", view="both", output_dir=str(seller_media / "animation"), background_color=color, ffmpeg_path=ffmpeg_path, force=True)
-    return {"composite": composite, "showcase": showcase, "animation": animation}
+    return {
+        "composite": composite,
+        "showcase": showcase,
+        "animation": animation,
+        "physical_images_dir": str(physical_images_dir),
+    }
 
 
 def _copy_assembly_references(media: dict[str, Any], package_dir: Path) -> None:
@@ -231,7 +238,7 @@ def _metadata(facts: ReleaseFacts, product_name: str, release_version: str, arch
         "selection": {"visible_art_layers": len(facts.art_layers), "mounting_layers": len(facts.cleat_layers), "total_layers": len(facts.layers), "combined_layout": f"{COMBINED_LAYOUT_STEM}.dxf and {COMBINED_LAYOUT_STEM}.svg (10 mm-spaced grid)"},
         "dimensions": {"mm": facts.dimensions_mm, "source_png_pixels": facts.source_pixels, "dpi": facts.dpi},
         "buyer_files": [detail.__dict__ for detail in archives],
-        "seller_media": {"animation_duration_sec": media["animation"]["duration_sec"], "animation_resolution": media["animation"]["resolution"]},
+        "seller_media": {"animation_duration_sec": media["animation"]["duration_sec"], "animation_resolution": media["animation"]["resolution"], "physical_artwork_photos_dir": "Seller_Listing_Media/Physical_Artwork_Photos"},
         "license": {"physical_product_limit": 100},
         "etsy_policy": {"max_files": ETSY_MAX_FILES, "max_bytes_per_file": ETSY_MAX_BYTES, "source_url": ETSY_POLICY_URL, "verified_on": ETSY_POLICY_VERIFIED_ON},
         "warnings": list(facts.warnings),
