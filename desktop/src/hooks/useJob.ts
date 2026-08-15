@@ -27,6 +27,12 @@ export function useJob() {
     bridgeCountIn: number | null = null,
     mergeVisibleFractionIn: number | null = null,
     omegaBudgetFactorIn: number | null = null,
+    fabSizeIn: string | null = null,
+    dxfFrameMarginMm: number | null = null,
+    dxfSettingHoleDiameterMm: number | null = null,
+    dxfSettingHoleInsetMm: number | null = null,
+    addFrenchCleats = false,
+    createEtsyRelease = false,
   ) {
     setUiError("");
 
@@ -54,6 +60,12 @@ export function useJob() {
         bridgeCountIn: bridgeCountIn ?? null,
         mergeVisibleFraction: mergeVisibleFractionIn ?? null,
         omegaBudgetFactor: omegaBudgetFactorIn ?? null,
+        fabSizeIn: fabSizeIn ?? null,
+        dxfFrameMarginMm: dxfFrameMarginMm ?? null,
+        dxfSettingHoleDiameterMm: dxfSettingHoleDiameterMm ?? null,
+        dxfSettingHoleInsetMm: dxfSettingHoleInsetMm ?? null,
+        addFrenchCleats,
+        createEtsyRelease,
       });
 
       setJob(started);

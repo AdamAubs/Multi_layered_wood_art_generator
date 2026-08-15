@@ -78,6 +78,12 @@ function App() {
               bridgeCountIn,
               mergeVisibleFractionIn,
               omegaBudgetFactorIn,
+              fabSizeIn,
+              dxfFrameMarginMm,
+              dxfSettingHoleDiameterMm,
+              dxfSettingHoleInsetMm,
+              addFrenchCleats,
+              createEtsyRelease,
             ) =>
               startJob(
                 selectedProjectId,
@@ -87,6 +93,12 @@ function App() {
                 bridgeCountIn,
                 mergeVisibleFractionIn,
                 omegaBudgetFactorIn,
+                fabSizeIn,
+                dxfFrameMarginMm,
+                dxfSettingHoleDiameterMm,
+                dxfSettingHoleInsetMm,
+                addFrenchCleats,
+                createEtsyRelease,
               )
             }
             isDisabled={isRunning}
