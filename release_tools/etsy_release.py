@@ -32,6 +32,7 @@ def build_release(
     product_name: str | None = None,
     release_version: str = "v1.0",
     french_cleats: str = "ask",
+    include_license: bool = False,
     background_color: tuple[int, int, int] | None = None,
     ffmpeg_path: str | None = None,
     dry_run: bool = False,
@@ -49,6 +50,7 @@ def build_release(
         "product_name": product_name,
         "layers": [layer.stem for layer in facts.layers if cleat_mode == "include" or not layer.is_cleat],
         "french_cleats": cleat_mode,
+        "include_license": include_license,
         "combined_layout": f"{COMBINED_LAYOUT_STEM}.dxf and {COMBINED_LAYOUT_STEM}.svg (10 mm-spaced grid)",
         "destination": "outputs/final/EtsyRelease",
         "media": ["composite", "showcase", "front exploded video", "rear exploded video"],
@@ -82,13 +84,13 @@ def build_release(
         seller_media = release_root / "Seller_Listing_Media"
         media = _render_media(staged_final, seller_media, background_color, ffmpeg_path)
         _copy_assembly_references(media, package_dir)
-        write_buyer_documents(package_dir, staged_facts, release_version)
+        write_buyer_documents(package_dir, staged_facts, release_version, include_license=include_license)
         write_manifest(package_dir, staged_facts, release_version)
         archive_details = create_buyer_archives(buyer_root, package_dir, f"{safe_name}_{release_version}")
         write_upload_instructions(buyer_root / "ETSY_UPLOAD_FILES.txt", archive_details)
         handoff_path = release_root / "ETSY_HANDOFF.md"
-        write_etsy_handoff(handoff_path, staged_facts, product_name, release_version, [detail.__dict__ for detail in archive_details])
-        metadata = _metadata(staged_facts, product_name, release_version, archive_details, media)
+        write_etsy_handoff(handoff_path, staged_facts, product_name, release_version, [detail.__dict__ for detail in archive_details], license_included=include_license)
+        metadata = _metadata(staged_facts, product_name, release_version, archive_details, media, include_license)
         _write_json(release_root / "etsy_release_metadata.json", metadata)
         _write_json(release_root / "validation_report.json", {"source_hashes_unchanged": True, "svg_layers": len(staged_facts.layers), "combined_layout": True, "buyer_archives": len(archive_details)})
         (release_root / "release.log").write_text("\n\n".join(log_lines) + "\n", encoding="utf-8")
@@ -117,7 +119,7 @@ def _copy_staged_sources(facts: ReleaseFacts, staged_final: Path, *, include_exi
             continue
         shutil.copy2(layer.png_path, staged_final / layer.png_path.name)
         shutil.copy2(layer.dxf_path, staged_final / layer.dxf_path.name)
-    for name in ("handoff.md", "run_metadata.json"):
+    for name in ("handoff.md", "run_metadata.json", "fabrication_settings.json"):
         source = facts.source_final / name
         if source.is_file():
             shutil.copy2(source, staged_final / name)
@@ -229,7 +231,7 @@ def _copy_assembly_references(media: dict[str, Any], package_dir: Path) -> None:
     shutil.copy2(views["rear"]["poster_path"], assembly / "exploded_rear.png")
 
 
-def _metadata(facts: ReleaseFacts, product_name: str, release_version: str, archives: list[Any], media: dict[str, Any]) -> dict[str, Any]:
+def _metadata(facts: ReleaseFacts, product_name: str, release_version: str, archives: list[Any], media: dict[str, Any], license_included: bool) -> dict[str, Any]:
     return {
         "schema_version": 1,
         "tool": "release_tools.etsy_release",
@@ -239,7 +241,7 @@ def _metadata(facts: ReleaseFacts, product_name: str, release_version: str, arch
         "dimensions": {"mm": facts.dimensions_mm, "source_png_pixels": facts.source_pixels, "dpi": facts.dpi},
         "buyer_files": [detail.__dict__ for detail in archives],
         "seller_media": {"animation_duration_sec": media["animation"]["duration_sec"], "animation_resolution": media["animation"]["resolution"], "physical_artwork_photos_dir": "Seller_Listing_Media/Physical_Artwork_Photos"},
-        "license": {"physical_product_limit": 100},
+        "license": {"included": license_included, "physical_product_limit": 100 if license_included else None},
         "etsy_policy": {"max_files": ETSY_MAX_FILES, "max_bytes_per_file": ETSY_MAX_BYTES, "source_url": ETSY_POLICY_URL, "verified_on": ETSY_POLICY_VERIFIED_ON},
         "warnings": list(facts.warnings),
         "validation": {"combined_layout": True, "release_name": product_name, "release_version": release_version},
@@ -305,6 +307,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--product-name")
     parser.add_argument("--release-version", default="v1.0")
     parser.add_argument("--french-cleats", choices=("ask", "include", "exclude"), default="ask")
+    parser.add_argument("--include-license", action="store_true", help="Include the default LICENSE.txt in the buyer download.")
     parser.add_argument("--background-color", type=_parse_color)
     parser.add_argument("--ffmpeg")
     parser.add_argument("--dry-run", action="store_true")
@@ -316,7 +319,7 @@ def _parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     try:
-        result = build_release(args.run_or_final, product_name=args.product_name, release_version=args.release_version, french_cleats=args.french_cleats, background_color=args.background_color, ffmpeg_path=args.ffmpeg, dry_run=args.dry_run, force=args.force, keep_staging=args.keep_staging)
+        result = build_release(args.run_or_final, product_name=args.product_name, release_version=args.release_version, french_cleats=args.french_cleats, include_license=args.include_license, background_color=args.background_color, ffmpeg_path=args.ffmpeg, dry_run=args.dry_run, force=args.force, keep_staging=args.keep_staging)
     except (OSError, RuntimeError, ReleaseValidationError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1

@@ -19,9 +19,10 @@ For an extended license, contact the Etsy seller.
 """
 
 
-def write_buyer_documents(package_dir: Path, facts: ReleaseFacts, release_version: str) -> None:
+def write_buyer_documents(package_dir: Path, facts: ReleaseFacts, release_version: str, *, include_license: bool) -> None:
     package_dir.joinpath("READ_ME_FIRST.txt").write_text(_readme(facts, release_version), encoding="utf-8")
-    package_dir.joinpath("LICENSE.txt").write_text(LICENSE_TEXT, encoding="utf-8")
+    if include_license:
+        package_dir.joinpath("LICENSE.txt").write_text(LICENSE_TEXT, encoding="utf-8")
 
 
 def write_manifest(package_dir: Path, facts: ReleaseFacts, release_version: str) -> None:

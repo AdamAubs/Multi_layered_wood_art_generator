@@ -11,6 +11,7 @@ import numpy as np
 
 from release_tools.run_facts import ReleaseValidationError, discover_release_facts
 from release_tools.etsy_release import _write_combined_layout
+from release_tools.buyer_docs import write_buyer_documents
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -86,6 +87,23 @@ class CombinedLayoutTests(unittest.TestCase):
             second_bbox = [value for point in polylines[1].get_points() for value in point[:2]]
             self.assertGreaterEqual(min(second_bbox[::2]) - max(first_bbox[::2]), 10.0)
             self.assertTrue((layout_dir / "All_Layers_Layout.svg").is_file())
+
+
+class BuyerLicenseTests(unittest.TestCase):
+    def test_license_is_written_only_when_requested(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            final_dir = Path(temporary) / "final"
+            final_dir.mkdir()
+            write_layer(final_dir, 0, "top")
+            facts = discover_release_facts(final_dir)
+            without_license = Path(temporary) / "without_license"
+            with_license = Path(temporary) / "with_license"
+            without_license.mkdir()
+            with_license.mkdir()
+            write_buyer_documents(without_license, facts, "v1.0", include_license=False)
+            write_buyer_documents(with_license, facts, "v1.0", include_license=True)
+            self.assertFalse((without_license / "LICENSE.txt").exists())
+            self.assertTrue((with_license / "LICENSE.txt").is_file())
 
 
 if __name__ == "__main__":

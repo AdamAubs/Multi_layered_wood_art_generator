@@ -49,6 +49,39 @@ fn normalize_prompt(prompt: Option<String>) -> Option<String> {
     })
 }
 
+fn validate_positive_option(value: Option<f64>, option: &str) -> Result<(), String> {
+    if let Some(value) = value {
+        if !value.is_finite() || value <= 0.0 {
+            return Err(format!("{option} must be a finite value greater than zero."));
+        }
+    }
+    Ok(())
+}
+
+fn validate_size_option(value: Option<&str>, option: &str) -> Result<(), String> {
+    let Some(value) = value else {
+        return Ok(());
+    };
+
+    let dimensions: Vec<&str> = value
+        .trim()
+        .split(|character| character == 'x' || character == 'X')
+        .collect();
+    if dimensions.len() != 2 {
+        return Err(format!("{option} must use WxH format such as 10x16."));
+    }
+
+    for dimension in dimensions {
+        let parsed = dimension.trim().parse::<f64>().map_err(|_| {
+            format!("{option} must use WxH format such as 10x16.")
+        })?;
+        if !parsed.is_finite() || parsed <= 0.0 {
+            return Err(format!("{option} values must be greater than zero."));
+        }
+    }
+    Ok(())
+}
+
 fn allocate_next_run_dir(runs_dir: &Path) -> Result<(String, PathBuf), String> {
     let day = run_day_token();
     let prefix = format!("run-{day}-");
@@ -307,6 +340,12 @@ pub fn start_job(
     bridge_count_in: Option<u32>,
     merge_visible_fraction: Option<f64>,
     omega_budget_factor: Option<f64>,
+    fab_size_in: Option<String>,
+    dxf_frame_margin_mm: Option<f64>,
+    dxf_setting_hole_diameter_mm: Option<f64>,
+    dxf_setting_hole_inset_mm: Option<f64>,
+    add_french_cleats: Option<bool>,
+    create_etsy_release: Option<bool>,
 ) -> Result<crate::types::JobSnapshot, String> {
     let project_id_trimmed = project_id.trim().to_string();
     if project_id_trimmed.is_empty() {
@@ -319,6 +358,20 @@ pub fn start_job(
     }
     if !PathBuf::from(&image_path_trimmed).is_file() {
         return Err(format!("Image path does not exist: {image_path_trimmed}"));
+    }
+
+    validate_size_option(fab_size_in.as_deref(), "Final outer frame size")?;
+    validate_positive_option(dxf_frame_margin_mm, "DXF frame margin")?;
+    validate_positive_option(
+        dxf_setting_hole_diameter_mm,
+        "Setting-hole diameter",
+    )?;
+    validate_positive_option(dxf_setting_hole_inset_mm, "Setting-hole inset")?;
+
+    let effective_hole_diameter_mm = dxf_setting_hole_diameter_mm.unwrap_or(2.5);
+    let effective_hole_inset_mm = dxf_setting_hole_inset_mm.unwrap_or(7.0);
+    if effective_hole_inset_mm < effective_hole_diameter_mm / 2.0 {
+        return Err("Setting-hole inset must keep the hole inside the outer frame.".to_string());
     }
 
     let mut guard = job_store()
@@ -338,6 +391,12 @@ pub fn start_job(
         support_bridges_per_patch: bridge_count_in.unwrap_or(5),
         merge_visible_fraction,
         omega_budget_factor,
+        fab_size_in: fab_size_in.clone(),
+        dxf_frame_margin_mm,
+        dxf_setting_hole_diameter_mm,
+        dxf_setting_hole_inset_mm,
+        add_french_cleats: add_french_cleats.unwrap_or(false),
+        create_etsy_release: create_etsy_release.unwrap_or(false),
         generate_composite_preview: true,
         generate_showcase_preview: true,
     };
@@ -439,6 +498,32 @@ pub fn start_job(
 
         if let Some(v) = omega_budget_factor {
             cmd.arg("--omega-budget-factor").arg(v.to_string());
+        }
+
+        if let Some(ref size) = fab_size_in {
+            cmd.arg("--fab-size-in").arg(size);
+        }
+
+        if let Some(value) = dxf_frame_margin_mm {
+            cmd.arg("--dxf-frame-margin-mm").arg(value.to_string());
+        }
+
+        if let Some(value) = dxf_setting_hole_diameter_mm {
+            cmd.arg("--dxf-setting-hole-diameter-mm")
+                .arg(value.to_string());
+        }
+
+        if let Some(value) = dxf_setting_hole_inset_mm {
+            cmd.arg("--dxf-setting-hole-inset-mm")
+                .arg(value.to_string());
+        }
+
+        if add_french_cleats.unwrap_or(false) {
+            cmd.arg("--add-french-cleats");
+        }
+
+        if create_etsy_release.unwrap_or(false) {
+            cmd.arg("--create-etsy-release");
         }
 
 let mut child = match cmd

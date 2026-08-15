@@ -31,6 +31,18 @@ pub struct ParameterSnapshot {
     pub support_bridges_per_patch: u32,
     pub merge_visible_fraction: Option<f64>,
     pub omega_budget_factor: Option<f64>,
+    #[serde(default)]
+    pub fab_size_in: Option<String>,
+    #[serde(default)]
+    pub dxf_frame_margin_mm: Option<f64>,
+    #[serde(default)]
+    pub dxf_setting_hole_diameter_mm: Option<f64>,
+    #[serde(default)]
+    pub dxf_setting_hole_inset_mm: Option<f64>,
+    #[serde(default)]
+    pub add_french_cleats: bool,
+    #[serde(default)]
+    pub create_etsy_release: bool,
     pub generate_composite_preview: bool,
     pub generate_showcase_preview: bool,
 }

@@ -3,6 +3,7 @@ import { ProjectSummary } from "../types";
 
 const STOCK_PRESETS = ["12x20", "8x12", "18x24", "24x48"];
 const STOCK_SIZE_REGEX = /^\d+(\.\d+)?x\d+(\.\d+)?$/;
+const OUTER_FRAME_SIZE_PRESETS = ["5x5", "8x8", "10x10", "10x16"];
 
 const BRIDGE_PRESETS = ["3", "5", "8", "10", "12"];
 const BRIDGE_COUNT_REGEX = /^\d+$/;
@@ -10,6 +11,7 @@ const BRIDGE_COUNT_REGEX = /^\d+$/;
 const MERGE_PRESETS = ["0.01", "0.02", "0.03", "0.05", "0.1"];
 const OMEGA_PRESETS = ["0.008", "0.01", "0.012", "0.02"];
 const FRACTION_REGEX = /^(0?\.\d+)$/;
+const POSITIVE_NUMBER_REGEX = /^(?:\d+(?:\.\d*)?|\.\d+)$/;
 
 interface PipelineInputProps {
   selectedProjectId: string;
@@ -33,6 +35,12 @@ interface PipelineInputProps {
     bridgeCountIn: number | null,
     mergeVisibleFractionIn: number | null,
     omegaBudgetFactorIn: number | null,
+    fabSizeIn: string | null,
+    dxfFrameMarginMm: number,
+    dxfSettingHoleDiameterMm: number,
+    dxfSettingHoleInsetMm: number,
+    addFrenchCleats: boolean,
+    createEtsyRelease: boolean,
   ) => void;
   isDisabled: boolean;
 }
@@ -67,6 +75,16 @@ export function PipelineInput({
 
   const [omegaPreset, setOmegaPreset] = useState<string>("0.01");
   const [customOmega, setCustomOmega] = useState<string>("");
+
+  const [outerFrameSizePreset, setOuterFrameSizePreset] =
+    useState<string>("none");
+  const [customOuterFrameSize, setCustomOuterFrameSize] = useState<string>("");
+  const [frameMarginMm, setFrameMarginMm] = useState<string>("5");
+  const [settingHoleDiameterMm, setSettingHoleDiameterMm] =
+    useState<string>("2.5");
+  const [settingHoleInsetMm, setSettingHoleInsetMm] = useState<string>("7");
+  const [addFrenchCleats, setAddFrenchCleats] = useState(false);
+  const [createEtsyRelease, setCreateEtsyRelease] = useState(false);
 
   const isCustom = stockPreset === "other";
   const stockSizeValue = isCustom
@@ -110,13 +128,73 @@ export function PipelineInput({
     (!FRACTION_REGEX.test(customOmega) ||
       !(parseFloat(customOmega) > 0 && parseFloat(customOmega) < 1));
 
+  const isCustomOuterFrameSize = outerFrameSizePreset === "other";
+  const outerFrameSizeValue = isCustomOuterFrameSize
+    ? customOuterFrameSize
+    : outerFrameSizePreset === "none"
+      ? null
+      : outerFrameSizePreset;
+  const outerFrameSizeIsInvalid =
+    isCustomOuterFrameSize &&
+    customOuterFrameSize.length > 0 &&
+    !STOCK_SIZE_REGEX.test(customOuterFrameSize);
+
+  const parsePositiveNumber = (value: string) => {
+    const parsed = Number(value);
+    return POSITIVE_NUMBER_REGEX.test(value) &&
+      Number.isFinite(parsed) &&
+      parsed > 0
+      ? parsed
+      : null;
+  };
+  const frameMarginValue = parsePositiveNumber(frameMarginMm);
+  const settingHoleDiameterValue = parsePositiveNumber(settingHoleDiameterMm);
+  const settingHoleInsetValue = parsePositiveNumber(settingHoleInsetMm);
+  const dxfGeometryIsInvalid =
+    frameMarginValue === null ||
+    settingHoleDiameterValue === null ||
+    settingHoleInsetValue === null ||
+    (settingHoleDiameterValue !== null &&
+      settingHoleInsetValue !== null &&
+      settingHoleInsetValue < settingHoleDiameterValue / 2);
+
+  const outerFrameBoundsAreInvalid = (() => {
+    if (
+      outerFrameSizeValue === null ||
+      !STOCK_SIZE_REGEX.test(outerFrameSizeValue) ||
+      frameMarginValue === null ||
+      settingHoleDiameterValue === null ||
+      settingHoleInsetValue === null
+    ) {
+      return false;
+    }
+    const [widthIn, heightIn] = outerFrameSizeValue
+      .toLowerCase()
+      .split("x")
+      .map(Number);
+    const widthMm = widthIn * 25.4;
+    const heightMm = heightIn * 25.4;
+    const holeRadiusMm = settingHoleDiameterValue / 2;
+    return (
+      widthMm <= frameMarginValue * 2 ||
+      heightMm <= frameMarginValue * 2 ||
+      settingHoleInsetValue + holeRadiusMm > Math.min(widthMm, heightMm)
+    );
+  })();
+
   const canStart =
     !isDisabled &&
     selectedProjectId.trim().length > 0 &&
     imagePath.trim().length > 0 &&
     !(isCustom && (customStock.length === 0 || customIsInvalid)) &&
     !(isBridgeCustom && (customBridge.length === 0 || bridgeCustomIsInvalid)) &&
-    !(isMergeCustom && (customMerge.length === 0 || mergeCustomIsInvalid));
+    !(isMergeCustom && (customMerge.length === 0 || mergeCustomIsInvalid)) &&
+    !(
+      isCustomOuterFrameSize &&
+      (customOuterFrameSize.length === 0 || outerFrameSizeIsInvalid)
+    ) &&
+    !dxfGeometryIsInvalid &&
+    !outerFrameBoundsAreInvalid;
 
   function handleStart() {
     const normalizedPrompt = promptValue.trim();
@@ -126,244 +204,382 @@ export function PipelineInput({
       bridgeCountValue,
       mergeVisibleFractionValue,
       omegaBudgetFactorValue,
+      outerFrameSizeValue,
+      frameMarginValue!,
+      settingHoleDiameterValue!,
+      settingHoleInsetValue!,
+      addFrenchCleats,
+      createEtsyRelease,
     );
   }
+
+  const selectedProjectTitle = projects.find(
+    (project) => project.projectId === selectedProjectId,
+  )?.title;
 
   return (
     <div className="start-container">
       <div className="input-container">
-        <h3>Project</h3>
-        <label>
-          Project
-          <select
-            value={selectedProjectId}
-            onChange={(e) => onSelectProjectId(e.currentTarget.value)}
-            disabled={isDisabled || isLoadingProjects}
-          >
-            <option value="">Select Existing Project</option>
-            {projects.map((p) => (
-              <option key={p.projectId} value={p.projectId}>
-                {p.title} ({p.projectId})
-              </option>
-            ))}
-          </select>
-        </label>
+        <details className="project-dropdown" open>
+          <summary>
+            <span>Project</span>
+            <span className="project-dropdown-value">
+              {selectedProjectTitle ?? "Choose a project"}
+            </span>
+          </summary>
+          <div className="project-fields">
+            <label className="field-control">
+              <span>Existing project</span>
+              <select
+                value={selectedProjectId}
+                onChange={(e) => onSelectProjectId(e.currentTarget.value)}
+                disabled={isDisabled || isLoadingProjects}
+              >
+                <option value="">Select existing project</option>
+                {projects.map((project) => (
+                  <option key={project.projectId} value={project.projectId}>
+                    {project.title} ({project.projectId})
+                  </option>
+                ))}
+              </select>
+            </label>
 
-        <div style={{ display: "flex", gap: "8px", alignItems: "end" }}>
-          <label style={{ flex: 1 }}>
-            New project title
-            <input
-              value={newProjectTitle}
-              onChange={(e) => onNewProjectTitleChange(e.currentTarget.value)}
-              placeholder="e.g. Tomorrow Test"
-              disabled={isDisabled || isCreatingProject}
-            />
-          </label>
-          <button
-            onClick={onCreateProject}
-            disabled={
-              isDisabled || isCreatingProject || !newProjectTitle.trim()
-            }
-          >
-            {isCreatingProject ? "Creating..." : "+ New Project"}
-          </button>
-          <button
-            onClick={onRefreshProjects}
-            disabled={isDisabled || isLoadingProjects}
-          >
-            Refresh
-          </button>
-        </div>
+            <label className="field-control">
+              <span>New project title</span>
+              <input
+                value={newProjectTitle}
+                onChange={(e) => onNewProjectTitleChange(e.currentTarget.value)}
+                placeholder="e.g. Tomorrow Test"
+                disabled={isDisabled || isCreatingProject}
+              />
+            </label>
 
-        {projectsError && (
-          <p style={{ color: "red", marginTop: "6px" }}>{projectsError}</p>
-        )}
+            <div className="project-actions">
+              <button
+                onClick={onCreateProject}
+                disabled={
+                  isDisabled || isCreatingProject || !newProjectTitle.trim()
+                }
+              >
+                {isCreatingProject ? "Creating..." : "Create project"}
+              </button>
+              <button
+                className="secondary-button"
+                onClick={onRefreshProjects}
+                disabled={isDisabled || isLoadingProjects}
+              >
+                Refresh projects
+              </button>
+            </div>
+          </div>
+          {projectsError && <p className="field-error">{projectsError}</p>}
+        </details>
 
-        <label>
-          Image path
-          <input
-            value={imagePath}
-            onChange={(e) => onPathChange(e.currentTarget.value)}
-            placeholder="/absolute/path/to/image.png"
-            disabled={isDisabled}
-          />
-          <button onClick={onBrowse} disabled={isDisabled}>
-            Browse...
-          </button>
-        </label>
+        <section className="workflow-section">
+          <div className="section-heading">
+            <h2>Source artwork</h2>
+            <p>Choose the image and optionally retain its generation prompt.</p>
+          </div>
+          <div className="source-fields">
+            <label className="field-control source-file-field">
+              <span>Image file</span>
+              <div className="file-input-row">
+                <input
+                  value={imagePath}
+                  onChange={(e) => onPathChange(e.currentTarget.value)}
+                  placeholder="/absolute/path/to/image.png"
+                  disabled={isDisabled}
+                />
+                <button
+                  className="secondary-button"
+                  onClick={onBrowse}
+                  disabled={isDisabled}
+                >
+                  Browse
+                </button>
+              </div>
+            </label>
 
-        <label>
-          Image-generation prompt (optional)
-          <textarea
-            value={promptValue}
-            onChange={(e) => onPromptChange(e.currentTarget.value)}
-            placeholder="Paste the prompt used to create this image."
-            rows={5}
-            disabled={isDisabled}
-          />
-        </label>
-        <p
-          style={{ marginTop: "4px", marginBottom: "10px", fontSize: "0.9em" }}
-        >
-          This prompt is saved for future image and pipeline tuning. It is not
-          required by the wood-art generator.
-        </p>
+            <label className="field-control source-prompt-field">
+              <span>
+                Image-generation prompt <em>(optional)</em>
+              </span>
+              <textarea
+                value={promptValue}
+                onChange={(e) => onPromptChange(e.currentTarget.value)}
+                placeholder="Paste the prompt used to create this image."
+                rows={4}
+                disabled={isDisabled}
+              />
+              <small>
+                Saved with the run for future image and pipeline tuning.
+              </small>
+            </label>
+          </div>
+        </section>
 
-        <div className="additional-options-container">
-          <label>
-            Stock size (inches)
-            <select
-              value={stockPreset}
-              onChange={(e) => setStockPreset(e.currentTarget.value)}
-              disabled={isDisabled}
-            >
-              <option value="none">None (default)</option>
-              {STOCK_PRESETS.map((p) => (
-                <option key={p} value={p}>
-                  {p}
-                </option>
-              ))}
-              <option value="other">Other...</option>
-            </select>
-          </label>
-
-          <div className="custom-size">
-            {isCustom && (
-              <label>
-                Custom size (W x H)
+        <section className="workflow-section">
+          <div className="section-heading">
+            <h2>Fabrication</h2>
+            <p>
+              Set the physical frame, stock, mounting, and delivery options.
+            </p>
+          </div>
+          <div className="parameter-grid fabrication-grid">
+            <label className="parameter-field">
+              <span>
+                Stock size <em>(inches)</em>
+              </span>
+              <select
+                value={stockPreset}
+                onChange={(e) => setStockPreset(e.currentTarget.value)}
+                disabled={isDisabled}
+              >
+                <option value="none">None (default)</option>
+                {STOCK_PRESETS.map((preset) => (
+                  <option key={preset} value={preset}>
+                    {preset}
+                  </option>
+                ))}
+                <option value="other">Custom...</option>
+              </select>
+              {isCustom && (
                 <input
                   value={customStock}
                   onChange={(e) => setCustomStock(e.currentTarget.value)}
                   placeholder="e.g. 10x16"
                   disabled={isDisabled}
                 />
-                {customIsInvalid && (
-                  <span style={{ color: "red", fontSize: "0.8em" }}>
-                    Format must be WxH (e.g. 12x20)
-                  </span>
-                )}
-              </label>
-            )}
+              )}
+              {customIsInvalid && (
+                <small className="field-error">Use WxH, such as 12x20.</small>
+              )}
+            </label>
+
+            <label className="parameter-field">
+              <span>
+                Final outer frame size <em>(inches)</em>
+              </span>
+              <select
+                value={outerFrameSizePreset}
+                onChange={(e) => setOuterFrameSizePreset(e.currentTarget.value)}
+                disabled={isDisabled}
+              >
+                <option value="none">Use image DPI (default)</option>
+                {OUTER_FRAME_SIZE_PRESETS.map((preset) => (
+                  <option key={preset} value={preset}>
+                    {preset}
+                  </option>
+                ))}
+                <option value="other">Custom...</option>
+              </select>
+              {isCustomOuterFrameSize && (
+                <input
+                  value={customOuterFrameSize}
+                  onChange={(e) =>
+                    setCustomOuterFrameSize(e.currentTarget.value)
+                  }
+                  placeholder="e.g. 10x16"
+                  disabled={isDisabled}
+                />
+              )}
+              {outerFrameSizeIsInvalid && (
+                <small className="field-error">Use WxH, such as 10x16.</small>
+              )}
+            </label>
+
+            <label className="parameter-field parameter-field-wide">
+              <span>
+                DXF frame margin <em>(mm)</em>
+              </span>
+              <input
+                type="number"
+                min="0.1"
+                step="0.1"
+                value={frameMarginMm}
+                onChange={(e) => setFrameMarginMm(e.currentTarget.value)}
+                disabled={isDisabled}
+              />
+              <small>
+                Exact space between the artwork contour and outer frame, not the
+                final artwork size. Final DXF coordinates scale to fill the
+                selected outer size.
+              </small>
+            </label>
+
+            <label className="parameter-field">
+              <span>
+                Setting-hole diameter <em>(mm)</em>
+              </span>
+              <input
+                type="number"
+                min="0.1"
+                step="0.1"
+                value={settingHoleDiameterMm}
+                onChange={(e) =>
+                  setSettingHoleDiameterMm(e.currentTarget.value)
+                }
+                disabled={isDisabled}
+              />
+            </label>
+
+            <label className="parameter-field">
+              <span>
+                Setting-hole inset <em>(mm)</em>
+              </span>
+              <input
+                type="number"
+                min="0.1"
+                step="0.1"
+                value={settingHoleInsetMm}
+                onChange={(e) => setSettingHoleInsetMm(e.currentTarget.value)}
+                disabled={isDisabled}
+              />
+              <small>Measured from each outer frame corner.</small>
+            </label>
+
+            <label className="toggle-field">
+              <input
+                type="checkbox"
+                checked={addFrenchCleats}
+                onChange={(e) => setAddFrenchCleats(e.currentTarget.checked)}
+                disabled={isDisabled}
+              />
+              <span>
+                <strong>Add French cleats</strong>
+                <small>Add mounting layers after finalization.</small>
+              </span>
+            </label>
+
+            <label className="toggle-field">
+              <input
+                type="checkbox"
+                checked={createEtsyRelease}
+                onChange={(e) => setCreateEtsyRelease(e.currentTarget.checked)}
+                disabled={isDisabled}
+              />
+              <span>
+                <strong>Create Etsy release</strong>
+                <small>Build buyer files after a successful run.</small>
+              </span>
+            </label>
           </div>
+        </section>
 
-          <label>
-            Support bridges per patch
-            <select
-              value={bridgePreset}
-              onChange={(e) => setBridgePreset(e.currentTarget.value)}
-              disabled={isDisabled}
-            >
-              {BRIDGE_PRESETS.map((p) => (
-                <option key={p} value={p}>
-                  {p}
-                </option>
-              ))}
-              <option value="other">Other...</option>
-            </select>
-          </label>
-
-          <div className="custom-bridge">
-            {isBridgeCustom && (
-              <label>
-                Custom bridge count
+        <section className="workflow-section">
+          <div className="section-heading">
+            <h2>Layer behavior</h2>
+            <p>Controls for support strength, merge tolerance, and detail.</p>
+          </div>
+          <div className="parameter-grid layer-grid">
+            <label className="parameter-field">
+              <span>Support bridges per patch</span>
+              <select
+                value={bridgePreset}
+                onChange={(e) => setBridgePreset(e.currentTarget.value)}
+                disabled={isDisabled}
+              >
+                {BRIDGE_PRESETS.map((preset) => (
+                  <option key={preset} value={preset}>
+                    {preset}
+                  </option>
+                ))}
+                <option value="other">Custom...</option>
+              </select>
+              {isBridgeCustom && (
                 <input
                   value={customBridge}
                   onChange={(e) => setCustomBridge(e.currentTarget.value)}
                   placeholder="e.g. 6"
                   disabled={isDisabled}
                 />
-                {bridgeCustomIsInvalid && (
-                  <span style={{ color: "red", fontSize: "0.8em" }}>
-                    Must be a positive whole number
-                  </span>
-                )}
-              </label>
-            )}
-          </div>
+              )}
+              {bridgeCustomIsInvalid && (
+                <small className="field-error">
+                  Use a positive whole number.
+                </small>
+              )}
+            </label>
 
-          <div className="custom-bridge">
-            <label>
-              Merge visible fraction
+            <label className="parameter-field">
+              <span>Merge visible fraction</span>
               <select
                 value={mergePreset}
                 onChange={(e) => setMergePreset(e.currentTarget.value)}
                 disabled={isDisabled}
               >
-                {MERGE_PRESETS.map((p) => (
-                  <option key={p} value={p}>
-                    {p}
+                {MERGE_PRESETS.map((preset) => (
+                  <option key={preset} value={preset}>
+                    {preset}
                   </option>
                 ))}
-                <option value="other">Other...</option>
+                <option value="other">Custom...</option>
               </select>
-            </label>
-
-            {isMergeCustom && (
-              <label>
-                Custom merge fraction
+              {isMergeCustom && (
                 <input
                   value={customMerge}
                   onChange={(e) => setCustomMerge(e.currentTarget.value)}
                   placeholder="e.g. 0.03"
                   disabled={isDisabled}
                 />
-                {mergeCustomIsInvalid && (
-                  <span style={{ color: "red", fontSize: "0.8em" }}>
-                    Must be a decimal between 0 and 1 (e.g. 0.03)
-                  </span>
-                )}
-              </label>
-            )}
-          </div>
+              )}
+              {mergeCustomIsInvalid && (
+                <small className="field-error">
+                  Use a decimal between 0 and 1.
+                </small>
+              )}
+            </label>
 
-          <div className="custom-bridge">
-            <label>
-              Omega budget factor
+            <label className="parameter-field">
+              <span>Omega budget factor</span>
               <select
                 value={omegaPreset}
                 onChange={(e) => setOmegaPreset(e.currentTarget.value)}
                 disabled={isDisabled}
               >
-                {OMEGA_PRESETS.map((p) => (
-                  <option key={p} value={p}>
-                    {p}
+                {OMEGA_PRESETS.map((preset) => (
+                  <option key={preset} value={preset}>
+                    {preset}
                   </option>
                 ))}
-                <option value="other">Other...</option>
+                <option value="other">Custom...</option>
               </select>
-            </label>
-
-            {isOmegaCustom && (
-              <label>
-                Custom omega factor
+              {isOmegaCustom && (
                 <input
                   value={customOmega}
                   onChange={(e) => setCustomOmega(e.currentTarget.value)}
                   placeholder="e.g. 0.01"
                   disabled={isDisabled}
                 />
-                {omegaCustomIsInvalid && (
-                  <span style={{ color: "red", fontSize: "0.8em" }}>
-                    Must be a decimal between 0 and 1 (e.g. 0.01)
-                  </span>
-                )}
-              </label>
+              )}
+              {omegaCustomIsInvalid && (
+                <small className="field-error">
+                  Use a decimal between 0 and 1.
+                </small>
+              )}
+            </label>
+          </div>
+        </section>
+
+        <div className="run-actions">
+          <div>
+            {bridgeWarning && (
+              <p className="field-warning">
+                High bridge counts can distort fine details. Values up to 10 are
+                usually more reliable.
+              </p>
+            )}
+            {(dxfGeometryIsInvalid || outerFrameBoundsAreInvalid) && (
+              <p className="field-error">
+                DXF geometry must use positive values, keep setting holes inside
+                the frame, and leave room for the selected frame margin.
+              </p>
             )}
           </div>
+          <button onClick={handleStart} disabled={!canStart}>
+            {isDisabled ? "Job running..." : "Start job"}
+          </button>
         </div>
-
-        {bridgeWarning && (
-          <div
-            style={{ color: "#ff6b00", fontSize: "0.9em", marginTop: "6px" }}
-          >
-            Note: High bridge counts may distort fine details. Consider values
-            up to 10 for best results.
-          </div>
-        )}
-
-        <button onClick={handleStart} disabled={!canStart}>
-          {isDisabled ? "Job running..." : "Start job"}
-        </button>
       </div>
     </div>
   );

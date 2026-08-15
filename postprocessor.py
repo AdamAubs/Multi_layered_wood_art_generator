@@ -10,6 +10,14 @@ import numpy as np
 import re
 import shutil
 
+from fabrication_tools.settings import (
+    DEFAULT_DXF_DPI,
+    DEFAULT_FRAME_MARGIN_MM,
+    DEFAULT_SETTING_HOLE_DIAMETER_MM,
+    DEFAULT_SETTING_HOLE_INSET_MM,
+    write_fabrication_settings,
+)
+
 
 def parse_args():
     parser = argparse.ArgumentParser(
@@ -65,8 +73,20 @@ def parse_args():
     parser.add_argument(
         "--dxf-dpi",
         type=float,
-        default=300.0,
+        default=DEFAULT_DXF_DPI,
         help="DPI to convert pixels to mm or inches.",
+    )
+    parser.add_argument(
+        "--dxf-dpi-x",
+        type=float,
+        default=None,
+        help="Horizontal DPI for finalized per-layer DXF conversion.",
+    )
+    parser.add_argument(
+        "--dxf-dpi-y",
+        type=float,
+        default=None,
+        help="Vertical DPI for finalized per-layer DXF conversion.",
     )
     parser.add_argument(
         "--dxf-simplify-epsilon",
@@ -106,19 +126,31 @@ def parse_args():
     parser.add_argument(
         "--dxf-frame-margin-mm",
         type=float,
-        default=5.0,
+        default=DEFAULT_FRAME_MARGIN_MM,
         help="Extra margin in mm between each layer contour and its outer frame.",
+    )
+    parser.add_argument(
+        "--dxf-frame-margin-x-mm",
+        type=float,
+        default=None,
+        help="Resolved horizontal margin in mm for finalized layer DXFs.",
+    )
+    parser.add_argument(
+        "--dxf-frame-margin-y-mm",
+        type=float,
+        default=None,
+        help="Resolved vertical margin in mm for finalized layer DXFs.",
     )
     parser.add_argument(
         "--dxf-setting-hole-diameter-mm",
         type=float,
-        default=2.5,
+        default=DEFAULT_SETTING_HOLE_DIAMETER_MM,
         help="Diameter in mm for the two corner setting holes.",
     )
     parser.add_argument(
         "--dxf-setting-hole-inset-mm",
         type=float,
-        default=7.0,
+        default=DEFAULT_SETTING_HOLE_INSET_MM,
         help="Inset in mm from each outer frame corner to the hole center.",
     )
     parser.add_argument(
@@ -1504,6 +1536,18 @@ def main():
     print("--------------------------\n")
 
     args = parse_args()
+    args.dxf_dpi_x = args.dxf_dpi if args.dxf_dpi_x is None else args.dxf_dpi_x
+    args.dxf_dpi_y = args.dxf_dpi if args.dxf_dpi_y is None else args.dxf_dpi_y
+    args.dxf_frame_margin_x_mm = (
+        args.dxf_frame_margin_mm
+        if args.dxf_frame_margin_x_mm is None
+        else args.dxf_frame_margin_x_mm
+    )
+    args.dxf_frame_margin_y_mm = (
+        args.dxf_frame_margin_mm
+        if args.dxf_frame_margin_y_mm is None
+        else args.dxf_frame_margin_y_mm
+    )
     run_name = resolve_run_name(args)
     input_dir, output_dir = resolve_dirs(args, run_name)
     dxf_path = resolve_dxf_path(args, run_name, output_dir) if args.export_dxf else None
@@ -1726,8 +1770,12 @@ def main():
         shell_loop = (
             'for f in output_final_*/Layer_*.png; do '
             'python png-to-dxf.py --png "$f" --dpi '
-            f'{args.dxf_dpi} '
+            f'{args.dxf_dpi_y} '
+            f'--dpi-x {args.dxf_dpi_x} '
+            f'--dpi-y {args.dxf_dpi_y} '
             f'--frame-margin-mm {args.dxf_frame_margin_mm} '
+            f'--frame-margin-x-mm {args.dxf_frame_margin_x_mm} '
+            f'--frame-margin-y-mm {args.dxf_frame_margin_y_mm} '
             f'--setting-hole-diameter-mm {args.dxf_setting_hole_diameter_mm} '
             f'--setting-hole-inset-mm {args.dxf_setting_hole_inset_mm}; '
             'done'
@@ -1778,6 +1826,23 @@ def main():
 
         if layout_stock_size:
             refresh_layout_cut_generator(final_dir, layout_stock_size, layout_gap_mm, run_log=args.run_log)
+
+        write_fabrication_settings(
+            final_dir,
+            {
+                "schema_version": 1,
+                "dxf": {
+                    "dpi": args.dxf_dpi_y,
+                    "dpi_x": args.dxf_dpi_x,
+                    "dpi_y": args.dxf_dpi_y,
+                    "frame_margin_mm": args.dxf_frame_margin_mm,
+                    "frame_margin_x_mm": args.dxf_frame_margin_x_mm,
+                    "frame_margin_y_mm": args.dxf_frame_margin_y_mm,
+                    "setting_hole_diameter_mm": args.dxf_setting_hole_diameter_mm,
+                    "setting_hole_inset_mm": args.dxf_setting_hole_inset_mm,
+                },
+            },
+        )
 
         # Copy run metadata into final dir if available
         src_meta = os.path.join(args.meta_dir, "run_metadata.json")

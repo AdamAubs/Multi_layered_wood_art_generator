@@ -23,13 +23,32 @@ Best results usually come from images with a small number of clear, flat color r
 
 If you are generating a new image, see [image_gen_prompts/generic-reccomendations.md](image_gen_prompts/generic-reccomendations.md) for prompt ideas and composition tips that fit this pipeline well.
 
-If you want the final DXF files to end up at a specific size, add `--fab-size-in`. The value uses `WxH` inches, such as `5x5`, and the pipeline computes the needed DXF DPI automatically:
+If you want the final DXF files to end up at a specific physical size, add `--fab-size-in`. The value uses `WxH` inches, such as `5x5`, and the pipeline computes the needed DXF DPI automatically:
 
 ```bash
 python pipeline.py --image images/GPT4.0/Stylized_crane_with_pine_branches.png --fab-size-in 5x5
 ```
 
-This flag sets the final outside size of the DXF, including the frame margin. For now it is intentionally strict: the source image must be square, and non-square images will fail fast instead of being stretched or fit into the box.
+This flag sets the final **outer DXF frame** size, including the frame margin. The pipeline scales the final DXF coordinates to fill the drawable area exactly, so the configured frame margin is used on all four sides and the outer DXF frame measures exactly the requested `WxH` size. When the target and source aspect ratios differ, horizontal and vertical DXF scaling differ; the source image and its layer segmentation are unchanged.
+
+The DXF frame margin is a separate millimeter setting. It is extra space between the artwork contour and outer frame, **not** the final artwork size. Setting-hole diameter and inset are also configurable:
+
+```bash
+python pipeline.py --image images/GPT4.0/Stylized_crane_with_pine_branches.png \
+	--fab-size-in 5x5 \
+	--dxf-frame-margin-mm 5 \
+	--dxf-setting-hole-diameter-mm 2.5 \
+	--dxf-setting-hole-inset-mm 7
+```
+
+Add `--add-french-cleats` to validate and create the mounting layers after finalization. Add `--create-etsy-release` to create a noninteractive Etsy package after the final package succeeds. The release includes cleat layers only when `--add-french-cleats` was also selected:
+
+```bash
+python pipeline.py --image images/GPT4.0/Stylized_crane_with_pine_branches.png \
+	--add-french-cleats --create-etsy-release
+```
+
+Each final package includes `fabrication_settings.json`, which records its resolved DPI, frame margin, and setting-hole geometry. Direct `png-to-dxf.py` and `add_french_cleats.py` calls reuse that configuration automatically when they target the package; an explicit CLI value overrides it.
 
 Cleanup generated folders:
 
@@ -247,10 +266,11 @@ Package a completed LazyLayerzzzLibrary run into a buyer-ready Etsy download, se
 ```bash
 python -m release_tools.etsy_release \
 	"LazyLayerzzzLibrary/projects/<project-name>/runs/<run-id>" \
-	--french-cleats include
+	--french-cleats include \
+	--include-license
 ```
 
-Use `--french-cleats exclude` for an art-only release. The default `ask` mode prompts for the choice in an interactive terminal. Add `--force` only when replacing an existing `outputs/final/EtsyRelease` build.
+Use `--french-cleats exclude` for an art-only release. The default `ask` mode prompts for the choice in an interactive terminal. Add `--include-license` only when the buyer download should contain the default `LICENSE.txt`; it is excluded otherwise. Add `--force` only when replacing an existing `outputs/final/EtsyRelease` build.
 
 The completed release is written to:
 

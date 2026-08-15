@@ -7,7 +7,7 @@ from pathlib import Path
 from release_tools.run_facts import INCHES_PER_MM, ReleaseFacts
 
 
-def write_etsy_handoff(path: Path, facts: ReleaseFacts, release_name: str, release_version: str, zip_details: list[dict[str, object]]) -> None:
+def write_etsy_handoff(path: Path, facts: ReleaseFacts, release_name: str, release_version: str, zip_details: list[dict[str, object]], *, license_included: bool) -> None:
     width_mm, height_mm = facts.dimensions_mm
     zips = "\n".join(f"  - {item['name']}: {item['size']} bytes" for item in zip_details) or "  - No archive created"
     warnings = "\n".join(f"  - {warning}" for warning in facts.warnings) or "  - No metadata conflicts found."
@@ -34,7 +34,7 @@ source_png_pixels: [{facts.source_pixels[0]}, {facts.source_pixels[1]}]
 recorded_dpi: {facts.dpi if facts.dpi else 'unknown'}
 combined_layout: one DXF and one matching SVG containing every delivered layer in a neat 10 mm-spaced grid
 french_cleats_included: {'yes' if facts.cleat_layers else 'no'}
-license_limit: 100 finished physical products
+license_included: {'yes; 100 finished physical products' if license_included else 'no; seller must provide license terms separately'}
 physical_fabrication_evidence: seller will provide photos of the completed physical artwork; seller confirmation required before making a production-test claim
 ```
 
