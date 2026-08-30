@@ -1,6 +1,7 @@
 import argparse
 from dataclasses import dataclass
 import json
+import math
 import os
 import re
 import subprocess
@@ -10,6 +11,12 @@ import cv2
 import numpy as np
 
 from fabrication_tools.settings import load_dxf_settings
+from fabrication_tools.frame_geometry import (
+    FRAME_GEOMETRY_FILENAME,
+    FRAME_SHAPES,
+    load_frame_geometry,
+    rasterize_outer_frame,
+)
 
 
 LAYER_FILE_RE = re.compile(
@@ -138,6 +145,17 @@ def parse_args():
         type=float,
         default=None,
         help="Setting-hole inset passed through to DXF regeneration (defaults to package settings or 7).",
+    )
+    parser.add_argument(
+        "--frame-shape",
+        choices=FRAME_SHAPES,
+        default=None,
+        help="Outer frame mode (defaults to package settings).",
+    )
+    parser.add_argument(
+        "--frame-geometry",
+        default=None,
+        help="Path to frame_geometry.json for first_layer mode.",
     )
     parser.add_argument(
         "--stock-size-in",
@@ -408,7 +426,11 @@ def regenerate_dxf_with_frame(png_path, args):
         f"{args.setting_hole_diameter_mm}",
         "--setting-hole-inset-mm",
         f"{args.setting_hole_inset_mm}",
+        "--frame-shape",
+        args.frame_shape,
     ]
+    if args.frame_geometry:
+        command.extend(["--frame-geometry", args.frame_geometry])
     subprocess.run(command, check=True)
 
 
@@ -498,11 +520,54 @@ def update_handoff(directory, added_layers, keyhole_layer, cavity_layer, args):
         handle.write(text)
 
 
-def make_blank_layer(shape):
+def make_blank_layer(shape, frame_mask=None):
     height, width = shape
     image = np.zeros((height, width, 4), dtype=np.uint8)
-    image[:, :, 3] = 255
+    image[:, :, 3] = frame_mask if frame_mask is not None else 255
     return image
+
+
+def _translate_mask(mask, dx, dy):
+    matrix = np.asarray([[1.0, 0.0, dx], [0.0, 1.0, dy]], dtype=np.float32)
+    return cv2.warpAffine(
+        mask,
+        matrix,
+        (mask.shape[1], mask.shape[0]),
+        flags=cv2.INTER_NEAREST,
+        borderMode=cv2.BORDER_CONSTANT,
+        borderValue=0,
+    )
+
+
+def fit_mount_masks_to_shaped_frame(keyhole_mask, cavity_mask, frame_mask, geometry):
+    """Move the mount near top-center until both cuts fit and avoid frame holes."""
+    forbidden = np.zeros_like(frame_mask)
+    mm_per_px = float(geometry["mm_per_px"])
+    height = frame_mask.shape[0]
+    radius_px = int(math.ceil((geometry["setting_hole_diameter_mm"] / 2.0 + 0.5) / mm_per_px))
+    for x_mm, y_mm in geometry["hole_centers_mm"]:
+        x = int(round(x_mm / mm_per_px))
+        y = int(round((height - 1) - y_mm / mm_per_px))
+        cv2.circle(forbidden, (x, y), radius_px, 255, thickness=-1)
+
+    step = max(1, int(round(2.0 / mm_per_px)))
+    x_offsets = [0]
+    for distance in range(step, max(step + 1, frame_mask.shape[1] // 3), step):
+        x_offsets.extend([-distance, distance])
+    for dy in range(0, max(step + 1, frame_mask.shape[0] // 2), step):
+        for dx in x_offsets:
+            keyhole = _translate_mask(keyhole_mask, dx, dy)
+            cavity = _translate_mask(cavity_mask, dx, dy)
+            proposal = cv2.bitwise_or(keyhole, cavity)
+            if np.any((proposal > 0) & (frame_mask == 0)):
+                continue
+            if np.any((proposal > 0) & (forbidden > 0)):
+                continue
+            return keyhole, cavity
+    raise ValueError(
+        "Could not place the French-cleat cavity inside the shaped frame without "
+        "overlapping alignment holes. Increase the frame size or disable French cleats."
+    )
 
 
 def overlay_white(image, mask):
@@ -561,6 +626,17 @@ def main():
         if args.setting_hole_inset_mm is not None
         else package_settings.setting_hole_inset_mm
     )
+    args.frame_shape = args.frame_shape or package_settings.frame_shape
+    frame_geometry = None
+    frame_mask = None
+    if args.frame_shape == "first_layer":
+        geometry_path = args.frame_geometry or os.path.join(
+            directory,
+            package_settings.frame_geometry_file or FRAME_GEOMETRY_FILENAME,
+        )
+        frame_geometry = load_frame_geometry(geometry_path)
+        args.frame_geometry = os.path.abspath(geometry_path)
+        frame_mask = rasterize_outer_frame(frame_geometry)
 
     if not args.dry_run:
         removed = remove_existing_french_cleat_files(directory)
@@ -576,6 +652,15 @@ def main():
 
     keyhole_mask = build_keyhole_mask(base_shape, args)
     cavity_mask = build_cavity_mask(base_shape, args)
+    if frame_mask is not None:
+        if frame_mask.shape != base_shape:
+            raise ValueError("Shaped frame geometry does not match finalized layer dimensions.")
+        keyhole_mask, cavity_mask = fit_mount_masks_to_shaped_frame(
+            keyhole_mask,
+            cavity_mask,
+            frame_mask,
+            frame_geometry,
+        )
     if len(layers) < 1:
         raise ValueError("At least one layer is required to add a French cleat.")
 
@@ -622,7 +707,7 @@ def main():
                 "label": label,
                 "png_path": os.path.join(directory, f"Layer_{new_index:02d}_{label}.png"),
                 "dxf_path": os.path.join(directory, f"Layer_{new_index:02d}_{label}.dxf"),
-                "image": make_blank_layer(base_shape),
+                "image": make_blank_layer(base_shape, frame_mask=frame_mask),
                 "synthetic": True,
             }
         )

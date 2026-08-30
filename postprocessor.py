@@ -17,6 +17,16 @@ from fabrication_tools.settings import (
     DEFAULT_SETTING_HOLE_INSET_MM,
     write_fabrication_settings,
 )
+from fabrication_tools.frame_geometry import (
+    FRAME_GEOMETRY_FILENAME,
+    FRAME_SHAPES,
+    build_first_layer_frame_geometry,
+    extract_first_layer_silhouette,
+    rasterize_outer_frame,
+    save_frame_geometry,
+    transform_and_clip_mask,
+)
+from fabrication_tools.png_to_dxf import extract_cut_contours, write_dxf
 
 
 def parse_args():
@@ -130,6 +140,17 @@ def parse_args():
         help="Extra margin in mm between each layer contour and its outer frame.",
     )
     parser.add_argument(
+        "--frame-shape",
+        choices=FRAME_SHAPES,
+        default="rectangle",
+        help="Outer frame mode: rectangle or the first selected layer outline.",
+    )
+    parser.add_argument(
+        "--fab-size-in",
+        default=None,
+        help="Optional shaped-frame fit box in inches as WxH.",
+    )
+    parser.add_argument(
         "--dxf-frame-margin-x-mm",
         type=float,
         default=None,
@@ -145,7 +166,7 @@ def parse_args():
         "--dxf-setting-hole-diameter-mm",
         type=float,
         default=DEFAULT_SETTING_HOLE_DIAMETER_MM,
-        help="Diameter in mm for the two corner setting holes.",
+        help="Diameter in mm for the four setting holes.",
     )
     parser.add_argument(
         "--dxf-setting-hole-inset-mm",
@@ -1282,6 +1303,7 @@ def export_dxf(
     frame_margin_mm,
     setting_hole_diameter_mm,
     setting_hole_inset_mm,
+    frame_geometry=None,
 ):
     try:
         import ezdxf
@@ -1304,8 +1326,16 @@ def export_dxf(
         doc.units = unit_map[dxf_units]
     msp = doc.modelspace()
 
-    height = frame.shape[0]
-    width = frame.shape[1]
+    if frame_geometry is not None:
+        export_masks = [
+            transform_and_clip_mask(mask, frame_geometry) for mask in working_masks
+        ]
+        height = int(frame_geometry["raster"]["height_px"])
+        width = int(frame_geometry["raster"]["width_px"])
+    else:
+        export_masks = working_masks
+        height = frame.shape[0]
+        width = frame.shape[1]
     margin_units = mm_to_units(frame_margin_mm, dxf_units, dxf_dpi)
     hole_radius_units = mm_to_units(setting_hole_diameter_mm / 2.0, dxf_units, dxf_dpi)
     hole_inset_units = mm_to_units(setting_hole_inset_mm, dxf_units, dxf_dpi)
@@ -1319,12 +1349,30 @@ def export_dxf(
         columns,
     )
     
-    for i, (mask, color_id) in enumerate(zip(working_masks, working_colors)):
+    for i, (mask, color_id) in enumerate(zip(export_masks, working_colors)):
         layer_name = f"Layer_{i:02d}_Color_{color_id}"
         if not doc.layers.has_entry(layer_name):
             doc.layers.new(name=layer_name, dxfattribs={"color": 7})
 
-        if include_frame:
+        if include_frame and frame_geometry is not None:
+            frame_points = [
+                (
+                    mm_to_units(point[0], dxf_units, dxf_dpi) + offsets[i][0],
+                    mm_to_units(point[1], dxf_units, dxf_dpi) + offsets[i][1],
+                )
+                for point in frame_geometry["outer_outline_mm"]
+            ]
+            if dxf_version == "R12":
+                msp.add_polyline2d(
+                    frame_points,
+                    dxfattribs={"layer": layer_name, "closed": True},
+                )
+            else:
+                msp.add_lwpolyline(
+                    frame_points,
+                    dxfattribs={"layer": layer_name, "closed": True},
+                )
+        elif include_frame:
             frame_points = frame_outline_points(
                 width,
                 height,
@@ -1343,7 +1391,17 @@ def export_dxf(
                     dxfattribs={"layer": layer_name, "closed": True},
                 )
 
-        if include_frame:
+        if include_frame and frame_geometry is not None:
+            for center_x_mm, center_y_mm in frame_geometry["hole_centers_mm"]:
+                msp.add_circle(
+                    (
+                        mm_to_units(center_x_mm, dxf_units, dxf_dpi) + offsets[i][0],
+                        mm_to_units(center_y_mm, dxf_units, dxf_dpi) + offsets[i][1],
+                    ),
+                    hole_radius_units,
+                    dxfattribs={"layer": layer_name},
+                )
+        elif include_frame:
             for hole_center in setting_hole_points(
                 width,
                 height,
@@ -1578,6 +1636,34 @@ def main():
 
     print("All layer images loaded.\n")
 
+    frame_geometry = None
+    if args.frame_shape == "first_layer":
+        try:
+            silhouette = extract_first_layer_silhouette(
+                cumulative_zones[0], frame_mask=frame
+            )
+            frame_geometry = build_first_layer_frame_geometry(
+                silhouette_mask=silhouette,
+                source_color_id=int(layer_order[0]),
+                frame_margin_mm=args.dxf_frame_margin_mm,
+                setting_hole_inset_mm=args.dxf_setting_hole_inset_mm,
+                setting_hole_diameter_mm=args.dxf_setting_hole_diameter_mm,
+                base_dpi=args.dxf_dpi,
+                requested_size_in=args.fab_size_in,
+            )
+        except (ValueError, ImportError) as exc:
+            print(f"Error: {exc}")
+            return 1
+        args.dxf_dpi = frame_geometry["dpi"]
+        args.dxf_dpi_x = frame_geometry["dpi_x"]
+        args.dxf_dpi_y = frame_geometry["dpi_y"]
+        print(
+            "First-layer frame: "
+            f"{frame_geometry['actual_width_mm']:.2f} × "
+            f"{frame_geometry['actual_height_mm']:.2f} mm, "
+            f"effective offset {frame_geometry['effective_offset_mm']:.2f} mm."
+        )
+
     individual_masks = reconstruct_individual_masks(cumulative_zones, frame)
     print("Reconstructed individual layer masks.")
 
@@ -1700,11 +1786,14 @@ def main():
                     os.remove(os.path.join(final_dir, name))
                 except OSError:
                     pass
-            elif name in {"handoff.md", "run_metadata.json"}:
+            elif name in {"handoff.md", "run_metadata.json", FRAME_GEOMETRY_FILENAME}:
                 try:
                     os.remove(os.path.join(final_dir, name))
                 except OSError:
                     pass
+
+        if frame_geometry is not None:
+            save_frame_geometry(final_dir, frame_geometry)
 
         # Load preprocessor metadata (palette)
         metadata = load_run_metadata(args.meta_dir) or load_run_metadata(input_dir) or {}
@@ -1754,8 +1843,13 @@ def main():
             png_name = f"Layer_{i:02d}_{base_label}.png"
             png_path = os.path.join(final_dir, png_name)
             merged_cumulative = cv2.bitwise_or(merged_cumulative, mask)
+            output_mask = (
+                transform_and_clip_mask(merged_cumulative, frame_geometry)
+                if frame_geometry is not None
+                else merged_cumulative
+            )
             # Write the cumulative safe-zone PNG so it matches postprocessed output content.
-            cv2.imwrite(png_path, merged_cumulative)
+            cv2.imwrite(png_path, output_mask)
             final_layer_pngs.append(
                 {
                     "index": i,
@@ -1764,36 +1858,38 @@ def main():
                 }
             )
 
-            # DXF conversion happens after all PNGs are written, via the exact shell loop.
-
-        # Convert the final PNGs to DXFs using the exact shell loop requested.
-        shell_loop = (
-            'for f in output_final_*/Layer_*.png; do '
-            'python png-to-dxf.py --png "$f" --dpi '
-            f'{args.dxf_dpi_y} '
-            f'--dpi-x {args.dxf_dpi_x} '
-            f'--dpi-y {args.dxf_dpi_y} '
-            f'--frame-margin-mm {args.dxf_frame_margin_mm} '
-            f'--frame-margin-x-mm {args.dxf_frame_margin_x_mm} '
-            f'--frame-margin-y-mm {args.dxf_frame_margin_y_mm} '
-            f'--setting-hole-diameter-mm {args.dxf_setting_hole_diameter_mm} '
-            f'--setting-hole-inset-mm {args.dxf_setting_hole_inset_mm}; '
-            'done'
-        )
-        print(f"Running DXF conversion loop: {shell_loop}")
-        env = os.environ.copy()
-        env["PATH"] = os.path.dirname(sys.executable) + os.pathsep + env.get("PATH", "")
-        try:
-            subprocess.run(
-                shell_loop,
-                shell=True,
-                check=True,
-                cwd=os.path.dirname(__file__),
-                env=env,
-                executable="/bin/zsh",
+        # Convert only this package's layer PNGs so geometry cannot leak between runs.
+        shell_loop = "package-scoped Python DXF conversion"
+        print("Converting current package layer PNGs to DXF...")
+        frame_clip = rasterize_outer_frame(frame_geometry) if frame_geometry is not None else None
+        for layer in final_layer_pngs:
+            mask_gray = cv2.imread(layer["path"], cv2.IMREAD_GRAYSCALE)
+            if mask_gray is None:
+                print(f"Error: Could not reload final mask for DXF conversion: {layer['path']}")
+                return 1
+            contours = extract_cut_contours(
+                mask_gray,
+                cut_white=True,
+                simplify_epsilon=0.5,
+                clip_mask=frame_clip,
             )
-        except subprocess.CalledProcessError as exc:
-            print(f"Warning: DXF conversion shell loop failed: {exc}")
+            dxf_path = os.path.splitext(layer["path"])[0] + ".dxf"
+            write_dxf(
+                contours,
+                dxf_path,
+                img_h=mask_gray.shape[0],
+                img_w=mask_gray.shape[1],
+                dpi=args.dxf_dpi_y,
+                dpi_x=args.dxf_dpi_x,
+                dpi_y=args.dxf_dpi_y,
+                frame_margin_mm=args.dxf_frame_margin_mm,
+                frame_margin_x_mm=args.dxf_frame_margin_x_mm,
+                frame_margin_y_mm=args.dxf_frame_margin_y_mm,
+                setting_hole_diameter_mm=args.dxf_setting_hole_diameter_mm,
+                setting_hole_inset_mm=args.dxf_setting_hole_inset_mm,
+                frame_geometry=frame_geometry,
+            )
+            print(f"  Saved: {dxf_path}")
 
         # Colorize final layer PNGs by painting only white mask pixels.
         # This is done after DXF conversion so vector export still traces binary masks.
@@ -1840,6 +1936,30 @@ def main():
                     "frame_margin_y_mm": args.dxf_frame_margin_y_mm,
                     "setting_hole_diameter_mm": args.dxf_setting_hole_diameter_mm,
                     "setting_hole_inset_mm": args.dxf_setting_hole_inset_mm,
+                    "frame_shape": args.frame_shape,
+                    "frame_geometry_file": (
+                        FRAME_GEOMETRY_FILENAME if frame_geometry is not None else None
+                    ),
+                },
+                "outer_frame": {
+                    "requested_size_in": args.fab_size_in,
+                    "width_mm": (
+                        frame_geometry["actual_width_mm"]
+                        if frame_geometry is not None
+                        else frame.shape[1] * 25.4 / args.dxf_dpi_x
+                        + 2.0 * args.dxf_frame_margin_x_mm
+                    ),
+                    "height_mm": (
+                        frame_geometry["actual_height_mm"]
+                        if frame_geometry is not None
+                        else frame.shape[0] * 25.4 / args.dxf_dpi_y
+                        + 2.0 * args.dxf_frame_margin_y_mm
+                    ),
+                    "effective_offset_mm": (
+                        frame_geometry["effective_offset_mm"]
+                        if frame_geometry is not None
+                        else args.dxf_frame_margin_mm
+                    ),
                 },
             },
         )
@@ -1867,6 +1987,11 @@ def main():
         lines.append(f"- Layers (final): {len(working_masks)}\n")
         lines.append(f"- Image size: {frame.shape[1]}×{frame.shape[0]} px ({total_pixels} px)\n")
         lines.append(f"- DXF units: {args.dxf_units}, DPI: {args.dxf_dpi}\n")
+        lines.append(f"- Frame shape: {args.frame_shape}\n")
+        if frame_geometry is not None:
+            lines.append(
+                f"- Effective frame offset: {frame_geometry['effective_offset_mm']:.2f} mm\n"
+            )
         lines.append("\n")
         lines.append("### Layer areas\n")
         for i, area in enumerate(final_areas):
@@ -2074,6 +2199,7 @@ def main():
             args.dxf_frame_margin_mm,
             args.dxf_setting_hole_diameter_mm,
             args.dxf_setting_hole_inset_mm,
+            frame_geometry=frame_geometry,
         ):
             return 1
 

@@ -11,6 +11,12 @@ from fabrication_tools.settings import (
     DEFAULT_SETTING_HOLE_INSET_MM,
     load_dxf_settings,
 )
+from fabrication_tools.frame_geometry import (
+    FRAME_GEOMETRY_FILENAME,
+    FRAME_SHAPES,
+    load_frame_geometry,
+    rasterize_outer_frame,
+)
 
 
 def parse_args():
@@ -66,6 +72,17 @@ def parse_args():
         help="ACI color index for the frame rectangle (default 2 = yellow, distinct from cut lines).",
     )
     parser.add_argument(
+        "--frame-shape",
+        choices=FRAME_SHAPES,
+        default=None,
+        help="Outer frame mode (defaults to package settings or rectangle).",
+    )
+    parser.add_argument(
+        "--frame-geometry",
+        default=None,
+        help="Path to frame_geometry.json for first_layer mode.",
+    )
+    parser.add_argument(
         "--frame-margin-mm",
         type=float,
         default=None,
@@ -103,7 +120,12 @@ def px_to_mm(px, dpi):
     return px * 25.4 / dpi
 
 
-def extract_cut_contours(mask_gray, cut_white=True, simplify_epsilon=0.5):
+def extract_cut_contours(
+    mask_gray,
+    cut_white=True,
+    simplify_epsilon=0.5,
+    clip_mask=None,
+):
     """
     Extract the contours that the laser should cut.
     cut_white=True:  laser cuts the white (void) regions → invert mask, find contours of voids.
@@ -116,6 +138,11 @@ def extract_cut_contours(mask_gray, cut_white=True, simplify_epsilon=0.5):
         target = cv2.bitwise_not(binary)
     else:
         target = binary
+
+    if clip_mask is not None:
+        if clip_mask.shape != target.shape:
+            raise ValueError("Frame geometry and PNG raster dimensions do not match.")
+        target = cv2.bitwise_and(target, (clip_mask > 0).astype(np.uint8) * 255)
 
     contours, _ = cv2.findContours(target, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
 
@@ -169,8 +196,9 @@ def write_dxf(
     frame_margin_y_mm=None,
     setting_hole_diameter_mm=2.5,
     setting_hole_inset_mm=10.0,
+    frame_geometry=None,
 ):
-    """Write contours as LWPOLYLINE entities plus an optional frame rectangle."""
+    """Write contours plus either a rectangular or shared shaped frame."""
     try:
         import ezdxf
     except ImportError:
@@ -184,13 +212,14 @@ def write_dxf(
     dpi_y = dpi if dpi_y is None else dpi_y
 
     # --- Cut contours ---
+    y_extent_px = img_h - 1 if frame_geometry is not None else img_h
     for cnt in contours:
         points = []
         for pt in cnt:
             x_px, y_px = float(pt[0][0]), float(pt[0][1])
             # Convert to mm; flip Y so origin is bottom-left (DXF convention)
             x_mm = px_to_mm(x_px, dpi_x)
-            y_mm = px_to_mm(img_h - y_px, dpi_y)
+            y_mm = px_to_mm(y_extent_px - y_px, dpi_y)
             points.append((x_mm, y_mm))
 
         if len(points) >= 2:
@@ -208,7 +237,14 @@ def write_dxf(
 
     # --- Outer frame rectangle ---
     # Draws a closed rectangle that sits outside the artwork by the requested margin.
-    if add_frame:
+    if add_frame and frame_geometry is not None:
+        frame_points = [tuple(point) for point in frame_geometry["outer_outline_mm"]]
+        msp.add_lwpolyline(
+            frame_points,
+            close=True,
+            dxfattribs={"color": frame_color},
+        )
+    elif add_frame:
         frame_points = [
             (-frame_margin_x_mm, -frame_margin_y_mm),
             (w_mm + frame_margin_x_mm, -frame_margin_y_mm),
@@ -221,7 +257,7 @@ def write_dxf(
             dxfattribs={"color": frame_color},
         )
 
-    if frame_points is None:
+    if frame_points is None and frame_geometry is None:
         frame_points = [
             (-frame_margin_x_mm, -frame_margin_y_mm),
             (w_mm + frame_margin_x_mm, -frame_margin_y_mm),
@@ -229,12 +265,17 @@ def write_dxf(
             (-frame_margin_x_mm, h_mm + frame_margin_y_mm),
         ]
 
-    add_setting_holes(
-        msp,
-        frame_points=frame_points,
-        hole_inset_mm=setting_hole_inset_mm,
-        hole_diameter_mm=setting_hole_diameter_mm,
-    )
+    if frame_geometry is not None:
+        radius_mm = setting_hole_diameter_mm / 2.0
+        for center in frame_geometry["hole_centers_mm"]:
+            msp.add_circle(tuple(center), radius_mm, dxfattribs={"color": 1})
+    else:
+        add_setting_holes(
+            msp,
+            frame_points=frame_points,
+            hole_inset_mm=setting_hole_inset_mm,
+            hole_diameter_mm=setting_hole_diameter_mm,
+        )
 
     doc.saveas(out_path)
 
@@ -312,6 +353,16 @@ def main():
         if args.setting_hole_inset_mm is not None
         else package_settings.setting_hole_inset_mm
     )
+    args.frame_shape = args.frame_shape or package_settings.frame_shape
+    frame_geometry = None
+    if args.frame_shape == "first_layer":
+        geometry_path = args.frame_geometry
+        if geometry_path is None:
+            geometry_path = os.path.join(
+                os.path.dirname(os.path.abspath(args.png)),
+                package_settings.frame_geometry_file or FRAME_GEOMETRY_FILENAME,
+            )
+        frame_geometry = load_frame_geometry(geometry_path)
 
     # img = cv2.imread(args.png, cv2.IMREAD_GRAYSCALE)
     # if img is None:
@@ -320,10 +371,12 @@ def main():
 
     h, w = img.shape
 
+    clip_mask = rasterize_outer_frame(frame_geometry) if frame_geometry is not None else None
     contours = extract_cut_contours(
         img,
         cut_white=args.cut_white,
         simplify_epsilon=args.simplify,
+        clip_mask=clip_mask,
     )
     print(f"  Found {len(contours)} contours in {os.path.basename(args.png)}")
 
@@ -348,9 +401,17 @@ def main():
         frame_margin_y_mm=args.frame_margin_y_mm,
         setting_hole_diameter_mm=args.setting_hole_diameter_mm,
         setting_hole_inset_mm=args.setting_hole_inset_mm,
+        frame_geometry=frame_geometry,
     )
     print(f"  Saved: {out_path}")
-    if not args.no_frame:
+    if not args.no_frame and frame_geometry is not None:
+        print(
+            "  Frame: first-layer outline, "
+            f"{frame_geometry['actual_width_mm']:.2f} mm × "
+            f"{frame_geometry['actual_height_mm']:.2f} mm "
+            f"(effective offset {frame_geometry['effective_offset_mm']:.2f} mm)"
+        )
+    elif not args.no_frame:
         w_mm = px_to_mm(w, args.dpi_x)
         h_mm = px_to_mm(h, args.dpi_y)
         outer_w_mm = w_mm + 2.0 * args.frame_margin_x_mm
@@ -361,8 +422,8 @@ def main():
             f"{args.frame_margin_y_mm:.2f} mm vertical, color index {args.frame_color})"
         )
     print(
-        f"  Setting holes: 2 × {args.setting_hole_diameter_mm:.2f} mm "
-        f"(inset {args.setting_hole_inset_mm:.2f} mm from the frame corners)"
+        f"  Setting holes: 4 × {args.setting_hole_diameter_mm:.2f} mm "
+        f"(inset/clearance {args.setting_hole_inset_mm:.2f} mm)"
     )
 
 

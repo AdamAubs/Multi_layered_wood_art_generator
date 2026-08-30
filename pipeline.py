@@ -12,8 +12,9 @@ from fabrication_tools.settings import (
     DEFAULT_FRAME_MARGIN_MM,
     DEFAULT_SETTING_HOLE_DIAMETER_MM,
     DEFAULT_SETTING_HOLE_INSET_MM,
-    write_fabrication_settings as write_package_fabrication_settings,
+    merge_fabrication_settings as merge_package_fabrication_settings,
 )
+from fabrication_tools.frame_geometry import FRAME_SHAPES
 
 
 def parse_args():
@@ -99,6 +100,12 @@ def parse_args():
         help="Target final outer DXF frame size in inches as WxH, for example 5x5. Artwork scales to the requested frame margin.",
     )
     parser.add_argument(
+        "--frame-shape",
+        choices=FRAME_SHAPES,
+        default="rectangle",
+        help="Outer frame mode: rectangle (default) or the first selected layer outline.",
+    )
+    parser.add_argument(
         "--stock-size-in",
         default=None,
         help="Optional stock sheet size in inches as WxH (e.g. 12x20). When provided a combined layout DXF will be created and added to the final package.",
@@ -131,7 +138,7 @@ def parse_args():
         "--dxf-setting-hole-diameter-mm",
         type=float,
         default=DEFAULT_SETTING_HOLE_DIAMETER_MM,
-        help="Diameter in mm for the two corner setting holes.",
+        help="Diameter in mm for the four setting holes.",
     )
     parser.add_argument(
         "--dxf-setting-hole-inset-mm",
@@ -290,7 +297,7 @@ def main():
     outer_height_mm = image_h * 25.4 / dxf_dpi_y + (2.0 * frame_margin_y_mm)
     target_w_in = None
     target_h_in = None
-    if args.fab_size_in is not None:
+    if args.fab_size_in is not None and args.frame_shape == "rectangle":
         try:
             target_w_in, target_h_in = parse_fab_size_in(args.fab_size_in)
         except ValueError as exc:
@@ -314,6 +321,15 @@ def main():
             print(f"Error: {exc}")
             return 1
 
+    if args.fab_size_in is not None and args.frame_shape == "first_layer":
+        try:
+            target_w_in, target_h_in = parse_fab_size_in(args.fab_size_in)
+        except ValueError as exc:
+            print(f"Error: {exc}")
+            return 1
+        outer_width_mm = target_w_in * 25.4
+        outer_height_mm = target_h_in * 25.4
+
     try:
         validate_dxf_geometry(
             args.dxf_frame_margin_mm,
@@ -326,7 +342,7 @@ def main():
         print(f"Error: {exc}")
         return 1
 
-    if args.fab_size_in is not None:
+    if args.fab_size_in is not None and args.frame_shape == "rectangle":
         print(
             "Using computed DXF DPI "
             f"{dxf_dpi_x:.6f} (horizontal) and {dxf_dpi_y:.6f} (vertical) "
@@ -360,6 +376,8 @@ def main():
             "frame_margin_y_mm": frame_margin_y_mm,
             "setting_hole_diameter_mm": args.dxf_setting_hole_diameter_mm,
             "setting_hole_inset_mm": args.dxf_setting_hole_inset_mm,
+            "frame_shape": args.frame_shape,
+            "frame_geometry_file": "frame_geometry.json" if args.frame_shape == "first_layer" else None,
         },
         "outer_frame": {
             "width_mm": outer_width_mm,
@@ -375,6 +393,12 @@ def main():
             "path": None,
         },
     }
+    if args.frame_shape == "first_layer":
+        fabrication_settings["outer_frame"].pop("width_mm", None)
+        fabrication_settings["outer_frame"].pop("height_mm", None)
+        fabrication_settings["dxf"].pop("dpi", None)
+        fabrication_settings["dxf"].pop("dpi_x", None)
+        fabrication_settings["dxf"].pop("dpi_y", None)
 
     python = sys.executable
     preprocessor_cmd = [
@@ -448,7 +472,12 @@ def main():
         str(args.dxf_setting_hole_diameter_mm),
         "--dxf-setting-hole-inset-mm",
         str(args.dxf_setting_hole_inset_mm),
+        "--frame-shape",
+        args.frame_shape,
     ]
+
+    if args.fab_size_in is not None:
+        postprocessor_cmd.extend(["--fab-size-in", args.fab_size_in])
 
     if args.fab_size_in is not None:
         postprocessor_cmd.extend(
@@ -481,7 +510,7 @@ def main():
     if run_step(postprocessor_cmd, "Postprocessor", run_log) != 0:
         return 1
 
-    write_package_fabrication_settings(final_output, fabrication_settings)
+    merge_package_fabrication_settings(final_output, fabrication_settings)
 
     if args.add_french_cleats:
         french_cleat_cmd = [
@@ -505,6 +534,8 @@ def main():
             str(args.dxf_setting_hole_diameter_mm),
             "--setting-hole-inset-mm",
             str(args.dxf_setting_hole_inset_mm),
+            "--frame-shape",
+            args.frame_shape,
         ]
         if args.stock_size_in is not None:
             french_cleat_cmd.extend([
@@ -524,7 +555,7 @@ def main():
             return 1
 
         fabrication_settings["french_cleats"]["generated"] = True
-        write_package_fabrication_settings(final_output, fabrication_settings)
+        merge_package_fabrication_settings(final_output, fabrication_settings)
 
     if args.create_etsy_release:
         cleat_mode = "include" if args.add_french_cleats else "exclude"
@@ -543,7 +574,7 @@ def main():
             final_output,
             "EtsyRelease",
         )
-        write_package_fabrication_settings(final_output, fabrication_settings)
+        merge_package_fabrication_settings(final_output, fabrication_settings)
 
     print(f"\nPipeline complete. Postprocessed output saved to '{post_output}'.")
     print(f"Final fabrication package saved to '{final_output}'.")

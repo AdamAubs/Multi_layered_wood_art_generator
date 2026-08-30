@@ -186,6 +186,10 @@ export function LibraryPage({ onBackToGenerator }: LibraryPageProps) {
                 {String(selectedRun.run.parameters.omegaBudgetFactor)}
               </p>
               <p>
+                <strong>frameShape:</strong>{" "}
+                {selectedRun.run.parameters.frameShape ?? "rectangle"}
+              </p>
+              <p>
                 <strong>generateCompositePreview:</strong>{" "}
                 {String(selectedRun.run.parameters.generateCompositePreview)}
               </p>

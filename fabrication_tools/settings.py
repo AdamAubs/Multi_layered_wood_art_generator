@@ -23,6 +23,8 @@ class DxfSettings:
     frame_margin_y_mm: float = DEFAULT_FRAME_MARGIN_MM
     setting_hole_diameter_mm: float = DEFAULT_SETTING_HOLE_DIAMETER_MM
     setting_hole_inset_mm: float = DEFAULT_SETTING_HOLE_INSET_MM
+    frame_shape: str = "rectangle"
+    frame_geometry_file: str | None = None
 
 
 def _positive_number(value: Any, default: float) -> float:
@@ -46,6 +48,13 @@ def load_dxf_settings(directory: str | Path) -> DxfSettings:
     dxf = raw.get("dxf", {}) if isinstance(raw, dict) else {}
     if not isinstance(dxf, dict):
         return DxfSettings()
+    frame_shape = dxf.get("frame_shape", "rectangle")
+    if frame_shape not in {"rectangle", "first_layer"}:
+        frame_shape = "rectangle"
+    frame_geometry_file = dxf.get("frame_geometry_file")
+    if not isinstance(frame_geometry_file, str) or not frame_geometry_file.strip():
+        frame_geometry_file = None
+
     return DxfSettings(
         dpi=_positive_number(dxf.get("dpi"), DEFAULT_DXF_DPI),
         dpi_x=_positive_number(
@@ -76,7 +85,30 @@ def load_dxf_settings(directory: str | Path) -> DxfSettings:
             dxf.get("setting_hole_inset_mm"),
             DEFAULT_SETTING_HOLE_INSET_MM,
         ),
+        frame_shape=frame_shape,
+        frame_geometry_file=frame_geometry_file,
     )
+
+
+def merge_fabrication_settings(directory: str | Path, updates: dict[str, Any]) -> Path:
+    """Deep-merge package settings so later stages do not erase frame geometry."""
+    settings_path = Path(directory) / SETTINGS_FILENAME
+    try:
+        current = json.loads(settings_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        current = {}
+    if not isinstance(current, dict):
+        current = {}
+
+    def merge(target: dict[str, Any], source: dict[str, Any]) -> None:
+        for key, value in source.items():
+            if isinstance(value, dict) and isinstance(target.get(key), dict):
+                merge(target[key], value)
+            else:
+                target[key] = value
+
+    merge(current, updates)
+    return write_fabrication_settings(directory, current)
 
 
 def write_fabrication_settings(directory: str | Path, settings: dict[str, Any]) -> Path:

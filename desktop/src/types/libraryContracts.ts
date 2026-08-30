@@ -1,4 +1,5 @@
 export type RunStatus = "pending" | "running" | "completed" | "failed";
+export type FrameShape = "rectangle" | "first_layer";
 
 export type ProjectSummary = {
   schemaVersion: number;
@@ -16,6 +17,13 @@ export type ParameterSnapshot = {
   supportBridgesPerPatch: number;
   mergeVisibleFraction: number | null;
   omegaBudgetFactor: number | null;
+  fabSizeIn?: string | null;
+  frameShape?: FrameShape;
+  dxfFrameMarginMm?: number | null;
+  dxfSettingHoleDiameterMm?: number | null;
+  dxfSettingHoleInsetMm?: number | null;
+  addFrenchCleats?: boolean;
+  createEtsyRelease?: boolean;
   generateCompositePreview: boolean;
   generateShowcasePreview: boolean;
 };
