@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { ProjectSummary } from "../types";
+import { FrameShape, ProjectSummary } from "../types";
 
 const STOCK_PRESETS = ["12x20", "8x12", "18x24", "24x48"];
 const STOCK_SIZE_REGEX = /^\d+(\.\d+)?x\d+(\.\d+)?$/;
@@ -36,6 +36,7 @@ interface PipelineInputProps {
     mergeVisibleFractionIn: number | null,
     omegaBudgetFactorIn: number | null,
     fabSizeIn: string | null,
+    frameShape: FrameShape,
     dxfFrameMarginMm: number,
     dxfSettingHoleDiameterMm: number,
     dxfSettingHoleInsetMm: number,
@@ -78,6 +79,7 @@ export function PipelineInput({
 
   const [outerFrameSizePreset, setOuterFrameSizePreset] =
     useState<string>("none");
+  const [frameShape, setFrameShape] = useState<FrameShape>("rectangle");
   const [customOuterFrameSize, setCustomOuterFrameSize] = useState<string>("");
   const [frameMarginMm, setFrameMarginMm] = useState<string>("5");
   const [settingHoleDiameterMm, setSettingHoleDiameterMm] =
@@ -175,6 +177,16 @@ export function PipelineInput({
     const widthMm = widthIn * 25.4;
     const heightMm = heightIn * 25.4;
     const holeRadiusMm = settingHoleDiameterValue / 2;
+    const minimumShapedOffset = Math.max(
+      frameMarginValue,
+      settingHoleInsetValue + settingHoleDiameterValue + 0.5,
+    );
+    if (frameShape === "first_layer") {
+      return (
+        widthMm <= minimumShapedOffset * 2 ||
+        heightMm <= minimumShapedOffset * 2
+      );
+    }
     return (
       widthMm <= frameMarginValue * 2 ||
       heightMm <= frameMarginValue * 2 ||
@@ -205,6 +217,7 @@ export function PipelineInput({
       mergeVisibleFractionValue,
       omegaBudgetFactorValue,
       outerFrameSizeValue,
+      frameShape,
       frameMarginValue!,
       settingHoleDiameterValue!,
       settingHoleInsetValue!,
@@ -326,6 +339,23 @@ export function PipelineInput({
             </p>
           </div>
           <div className="parameter-grid fabrication-grid">
+            <label className="parameter-field parameter-field-wide">
+              <span>Frame shape</span>
+              <select
+                value={frameShape}
+                onChange={(e) => setFrameShape(e.currentTarget.value as FrameShape)}
+                disabled={isDisabled}
+              >
+                <option value="rectangle">Square/rectangle (current)</option>
+                <option value="first_layer">First-layer outline</option>
+              </select>
+              <small>
+                {frameShape === "first_layer"
+                  ? "Uses the first enclosed trace. Make the background dominant so it is selected first."
+                  : "Uses the current rectangular outer frame and corner holes."}
+              </small>
+            </label>
+
             <label className="parameter-field">
               <span>
                 Stock size <em>(inches)</em>
@@ -373,6 +403,12 @@ export function PipelineInput({
                 ))}
                 <option value="other">Custom...</option>
               </select>
+              {frameShape === "first_layer" && (
+                <small>
+                  The shaped outline fits inside this box without stretching;
+                  one dimension may be smaller.
+                </small>
+              )}
               {isCustomOuterFrameSize && (
                 <input
                   value={customOuterFrameSize}
@@ -401,9 +437,14 @@ export function PipelineInput({
                 disabled={isDisabled}
               />
               <small>
-                Exact space between the artwork contour and outer frame, not the
-                final artwork size. Final DXF coordinates scale to fill the
-                selected outer size.
+                {frameShape === "first_layer"
+                  ? `Minimum outline offset. Hole clearance requires at least ${Math.max(
+                      frameMarginValue ?? 0,
+                      (settingHoleInsetValue ?? 0) +
+                        (settingHoleDiameterValue ?? 0) +
+                        0.5,
+                    ).toFixed(1)} mm with the current hole settings.`
+                  : "Exact space between the artwork contour and outer frame, not the final artwork size."}
               </small>
             </label>
 
@@ -435,7 +476,11 @@ export function PipelineInput({
                 onChange={(e) => setSettingHoleInsetMm(e.currentTarget.value)}
                 disabled={isDisabled}
               />
-              <small>Measured from each outer frame corner.</small>
+              <small>
+                {frameShape === "first_layer"
+                  ? "Clearance from the first trace to the hole's nearest edge; one hole is placed per quadrant."
+                  : "Measured from each outer frame corner."}
+              </small>
             </label>
 
             <label className="toggle-field">

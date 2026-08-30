@@ -1,5 +1,22 @@
 use serde::{Deserialize, Serialize};
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum FrameShape {
+    #[default]
+    Rectangle,
+    FirstLayer,
+}
+
+impl FrameShape {
+    pub fn as_cli_value(self) -> &'static str {
+        match self {
+            Self::Rectangle => "rectangle",
+            Self::FirstLayer => "first_layer",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum RunStatus {
@@ -33,6 +50,8 @@ pub struct ParameterSnapshot {
     pub omega_budget_factor: Option<f64>,
     #[serde(default)]
     pub fab_size_in: Option<String>,
+    #[serde(default)]
+    pub frame_shape: FrameShape,
     #[serde(default)]
     pub dxf_frame_margin_mm: Option<f64>,
     #[serde(default)]
@@ -93,4 +112,24 @@ pub struct SavedRunSummary {
     pub outputs: OutputPaths,
     pub runtime_log_path: String,
     pub exit_code: Option<i32>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{FrameShape, ParameterSnapshot};
+
+    #[test]
+    fn older_parameter_snapshots_default_to_rectangle() {
+        let snapshot: ParameterSnapshot = serde_json::from_value(serde_json::json!({
+            "stockSizeIn": null,
+            "supportBridgesPerPatch": 5,
+            "mergeVisibleFraction": null,
+            "omegaBudgetFactor": null,
+            "generateCompositePreview": true,
+            "generateShowcasePreview": true
+        }))
+        .expect("older parameter snapshot should deserialize");
+
+        assert_eq!(snapshot.frame_shape, FrameShape::Rectangle);
+    }
 }

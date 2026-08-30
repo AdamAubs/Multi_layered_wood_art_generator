@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { JobSnapshot } from "../types";
+import { FrameShape, JobSnapshot } from "../types";
 import { isTerminal } from "../utils/statusHelpers";
 import { POLLING_INTERVAL } from "../utils/constants";
 
@@ -28,6 +28,7 @@ export function useJob() {
     mergeVisibleFractionIn: number | null = null,
     omegaBudgetFactorIn: number | null = null,
     fabSizeIn: string | null = null,
+    frameShape: FrameShape = "rectangle",
     dxfFrameMarginMm: number | null = null,
     dxfSettingHoleDiameterMm: number | null = null,
     dxfSettingHoleInsetMm: number | null = null,
@@ -61,6 +62,7 @@ export function useJob() {
         mergeVisibleFraction: mergeVisibleFractionIn ?? null,
         omegaBudgetFactor: omegaBudgetFactorIn ?? null,
         fabSizeIn: fabSizeIn ?? null,
+        frameShape,
         dxfFrameMarginMm: dxfFrameMarginMm ?? null,
         dxfSettingHoleDiameterMm: dxfSettingHoleDiameterMm ?? null,
         dxfSettingHoleInsetMm: dxfSettingHoleInsetMm ?? null,

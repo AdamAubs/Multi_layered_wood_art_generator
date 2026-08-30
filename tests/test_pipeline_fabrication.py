@@ -4,7 +4,11 @@ from tempfile import TemporaryDirectory
 
 import numpy as np
 
-from fabrication_tools.settings import load_dxf_settings, write_fabrication_settings
+from fabrication_tools.settings import (
+    load_dxf_settings,
+    merge_fabrication_settings,
+    write_fabrication_settings,
+)
 from fabrication_tools.png_to_dxf import write_dxf
 from pipeline import compute_dpi_for_outer_size, validate_dxf_geometry
 
@@ -111,6 +115,38 @@ class PipelineFabricationTests(unittest.TestCase):
         self.assertEqual(settings.frame_margin_y_mm, 6.0)
         self.assertEqual(settings.setting_hole_diameter_mm, 3.0)
         self.assertEqual(settings.setting_hole_inset_mm, 8.5)
+
+    def test_later_pipeline_updates_preserve_resolved_shaped_geometry(self):
+        with TemporaryDirectory() as temporary:
+            write_fabrication_settings(
+                temporary,
+                {
+                    "schema_version": 1,
+                    "dxf": {
+                        "dpi": 188.0,
+                        "frame_shape": "first_layer",
+                        "frame_geometry_file": "frame_geometry.json",
+                    },
+                    "outer_frame": {"width_mm": 127.0, "height_mm": 171.08},
+                },
+            )
+            merge_fabrication_settings(
+                temporary,
+                {"french_cleats": {"requested": True, "generated": True}},
+            )
+            settings = load_dxf_settings(temporary)
+            import json
+
+            raw = json.loads(
+                (Path(temporary) / "fabrication_settings.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+
+        self.assertEqual(settings.dpi, 188.0)
+        self.assertEqual(settings.frame_shape, "first_layer")
+        self.assertEqual(raw["outer_frame"]["width_mm"], 127.0)
+        self.assertTrue(raw["french_cleats"]["generated"])
 
 
 if __name__ == "__main__":

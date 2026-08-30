@@ -9,7 +9,7 @@ use chrono::Local;
 
 use crate::library_store::resolve_library_root;
 use crate::library_types::{
-    OutputPaths, ParameterSnapshot, PromptRef, RunSource, RunStatus as SavedRunStatus,
+    FrameShape, OutputPaths, ParameterSnapshot, PromptRef, RunSource, RunStatus as SavedRunStatus,
     SavedRunSummary,
 };
 use crate::log_tail::try_load_palette;
@@ -341,6 +341,7 @@ pub fn start_job(
     merge_visible_fraction: Option<f64>,
     omega_budget_factor: Option<f64>,
     fab_size_in: Option<String>,
+    frame_shape: Option<FrameShape>,
     dxf_frame_margin_mm: Option<f64>,
     dxf_setting_hole_diameter_mm: Option<f64>,
     dxf_setting_hole_inset_mm: Option<f64>,
@@ -385,6 +386,7 @@ pub fn start_job(
     }
 
     let job_id = format!("job-{}", now_millis());
+    let effective_frame_shape = frame_shape.unwrap_or_default();
 
     let parameter_snapshot = ParameterSnapshot {
         stock_size_in: stock_size_in.clone(),
@@ -392,6 +394,7 @@ pub fn start_job(
         merge_visible_fraction,
         omega_budget_factor,
         fab_size_in: fab_size_in.clone(),
+        frame_shape: effective_frame_shape,
         dxf_frame_margin_mm,
         dxf_setting_hole_diameter_mm,
         dxf_setting_hole_inset_mm,
@@ -503,6 +506,9 @@ pub fn start_job(
         if let Some(ref size) = fab_size_in {
             cmd.arg("--fab-size-in").arg(size);
         }
+
+        cmd.arg("--frame-shape")
+            .arg(effective_frame_shape.as_cli_value());
 
         if let Some(value) = dxf_frame_margin_mm {
             cmd.arg("--dxf-frame-margin-mm").arg(value.to_string());

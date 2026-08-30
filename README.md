@@ -41,6 +41,19 @@ python pipeline.py --image images/GPT4.0/Stylized_crane_with_pine_branches.png \
 	--dxf-setting-hole-inset-mm 7
 ```
 
+Use `--frame-shape first_layer` to replace the rectangle with an offset of the first selected layer's enclosed trace. Make the source background the dominant color so the generator selects it first and leaves one clean enclosed artwork silhouette:
+
+```bash
+python pipeline.py --image images/GPT4.0/Stylized_crane_with_pine_branches.png \
+	--frame-shape first_layer \
+	--fab-size-in 5x7 \
+	--dxf-frame-margin-mm 5 \
+	--dxf-setting-hole-diameter-mm 2.5 \
+	--dxf-setting-hole-inset-mm 5
+```
+
+Shaped frames fit inside the requested `WxH` box without distorting the silhouette. Their effective offset is the larger of the requested margin or `hole inset + hole diameter + 0.5 mm`; the example therefore uses an 8 mm offset. One alignment hole is placed in each quadrant outside the first trace, and the same outline and hole coordinates are written to every layer. The resolved geometry is saved as `frame_geometry.json`. The default `--frame-shape rectangle` behavior is unchanged.
+
 Add `--add-french-cleats` to validate and create the mounting layers after finalization. Add `--create-etsy-release` to create a noninteractive Etsy package after the final package succeeds. The release includes cleat layers only when `--add-french-cleats` was also selected:
 
 ```bash
