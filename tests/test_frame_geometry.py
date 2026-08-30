@@ -7,6 +7,8 @@ import cv2
 import numpy as np
 
 from fabrication_tools.frame_geometry import (
+    _polygon_from_contour,
+    _silhouette_contour,
     build_first_layer_frame_geometry,
     extract_first_layer_silhouette,
     rasterize_outer_frame,
@@ -47,14 +49,34 @@ class FirstLayerFrameGeometryTests(unittest.TestCase):
         cv2.circle(cumulative, (60, 100), 30, 0, thickness=-1)
         cv2.circle(cumulative, (140, 100), 30, 0, thickness=-1)
 
-        with self.assertRaisesRegex(ValueError, "Found 2 meaningful enclosed traces"):
+        with self.assertRaisesRegex(ValueError, "Found 2 competing enclosed traces"):
             extract_first_layer_silhouette(cumulative)
+
+    def test_uses_dominant_trace_and_ignores_small_enclosed_pocket(self):
+        cumulative = np.full((240, 240), 255, dtype=np.uint8)
+        cv2.circle(cumulative, (120, 120), 75, 0, thickness=-1)
+        cv2.circle(cumulative, (215, 215), 8, 0, thickness=-1)
+
+        silhouette = extract_first_layer_silhouette(cumulative)
+
+        self.assertEqual(silhouette[120, 120], 255)
+        self.assertEqual(silhouette[215, 215], 0)
+
+    def test_repairs_raster_corner_contacts_for_vector_geometry(self):
+        silhouette = np.zeros((180, 180), dtype=np.uint8)
+        cv2.rectangle(silhouette, (20, 20), (85, 85), 255, thickness=-1)
+        cv2.rectangle(silhouette, (86, 86), (150, 150), 255, thickness=-1)
+
+        polygon = _polygon_from_contour(_silhouette_contour(silhouette), 0.1)
+
+        self.assertEqual(polygon.geom_type, "Polygon")
+        self.assertTrue(polygon.is_valid)
 
     def test_rejects_trace_touching_image_boundary(self):
         cumulative = np.full((200, 200), 255, dtype=np.uint8)
         cv2.rectangle(cumulative, (0, 40), (100, 160), 0, thickness=-1)
 
-        with self.assertRaisesRegex(ValueError, "touches the image boundary"):
+        with self.assertRaisesRegex(ValueError, "reaches the image boundary"):
             extract_first_layer_silhouette(cumulative)
 
     def test_rejects_trace_touching_generator_safety_frame(self):
@@ -70,7 +92,7 @@ class FirstLayerFrameGeometryTests(unittest.TestCase):
             thickness=-1,
         )
 
-        with self.assertRaisesRegex(ValueError, "touches the image boundary"):
+        with self.assertRaisesRegex(ValueError, "reaches the image boundary"):
             extract_first_layer_silhouette(cumulative, frame_mask=frame)
 
     def test_builds_eight_mm_offset_and_four_quadrant_holes(self):

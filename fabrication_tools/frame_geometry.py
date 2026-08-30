@@ -14,6 +14,7 @@ import numpy as np
 FRAME_GEOMETRY_FILENAME = "frame_geometry.json"
 FRAME_SHAPES = ("rectangle", "first_layer")
 OUTER_WEB_MM = 0.5
+MIN_SILHOUETTE_DOMINANCE_RATIO = 4.0
 
 
 def parse_size_in(value: str | None) -> tuple[float, float] | None:
@@ -38,15 +39,14 @@ def extract_first_layer_silhouette(
     min_area_fraction: float = 0.00005,
     frame_mask: np.ndarray | None = None,
 ) -> np.ndarray:
-    """Return one filled, enclosed void from the first cumulative safe zone."""
+    """Return the dominant filled, enclosed void from the first safe zone."""
     if first_cumulative.ndim != 2:
         raise ValueError("The first cumulative layer must be a grayscale mask.")
 
     void = (first_cumulative == 0).astype(np.uint8)
     count, labels, stats, _ = cv2.connectedComponentsWithStats(void, connectivity=8)
     min_area = max(1, int(round(void.size * min_area_fraction)))
-    candidates: list[int] = []
-    border_components: list[int] = []
+    components: list[tuple[int, int, bool]] = []
     height, width = void.shape
 
     for component in range(1, count):
@@ -64,29 +64,46 @@ def extract_first_layer_silhouette(
             component_mask = (labels == component).astype(np.uint8)
             expanded = cv2.dilate(component_mask, np.ones((3, 3), np.uint8))
             touches_generator_frame = bool(np.any((expanded > 0) & (frame_mask > 0)))
-        if (
+        touches_boundary = (
             x <= 0
             or y <= 0
             or x + w >= width
             or y + h >= height
             or touches_generator_frame
-        ):
-            border_components.append(component)
-        else:
-            candidates.append(component)
+        )
+        components.append((component, area, touches_boundary))
 
     guidance = (
-        "First-layer frame requires one clean enclosed trace. Make the background "
-        "the dominant color so it is selected first, or use the rectangular frame."
+        "First-layer frame requires one dominant enclosed artwork silhouette. "
+        "Make the background the dominant color and add uniform background padding "
+        "so the artwork and its shadows clear every edge, or use the rectangular frame."
     )
-    if border_components:
-        raise ValueError(f"The first selected trace touches the image boundary. {guidance}")
-    if len(candidates) != 1:
+    components.sort(key=lambda item: item[1], reverse=True)
+    if not components:
         raise ValueError(
-            f"Found {len(candidates)} meaningful enclosed traces in the first layer. {guidance}"
+            f"Found 0 meaningful enclosed traces in the first layer. {guidance}"
         )
 
-    component_mask = (labels == candidates[0]).astype(np.uint8) * 255
+    selected_component, selected_area, touches_boundary = components[0]
+    if touches_boundary:
+        raise ValueError(
+            "The dominant first-layer artwork silhouette reaches the image boundary. "
+            f"{guidance}"
+        )
+
+    competing_components = [
+        component
+        for component in components[1:]
+        if component[1] * MIN_SILHOUETTE_DOMINANCE_RATIO >= selected_area
+    ]
+    if competing_components:
+        competing_count = 1 + len(competing_components)
+        raise ValueError(
+            f"Found {competing_count} competing enclosed traces in the first layer. "
+            f"{guidance}"
+        )
+
+    component_mask = (labels == selected_component).astype(np.uint8) * 255
     contours, _ = cv2.findContours(
         component_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
     )
@@ -115,11 +132,25 @@ def _polygon_from_contour(points_px: np.ndarray, mm_per_px: float):
 
     points_mm = [(float(x) * mm_per_px, -float(y) * mm_per_px) for x, y in points_px]
     polygon = Polygon(points_mm)
-    if not polygon.is_valid:
-        polygon = polygon.buffer(0)
-    if polygon.geom_type != "Polygon" or polygon.is_empty:
-        raise ValueError("First-layer trace could not be converted into one valid polygon.")
-    return polygon
+    if polygon.is_valid and not polygon.is_empty:
+        return polygon
+
+    repaired = polygon.buffer(0)
+    if repaired.geom_type == "Polygon" and not repaired.is_empty:
+        return repaired
+
+    # Eight-connected raster silhouettes can meet at a pixel corner. That is a
+    # single component in OpenCV but a zero-width pinch in vector geometry, so
+    # close only enough sub-pixel gaps to recover the raster's intended shape.
+    for repair_px in (0.5, 1.0, 2.0, 3.0, 4.0):
+        repair_distance = repair_px * mm_per_px
+        repaired = polygon.buffer(repair_distance, join_style=1).buffer(
+            -repair_distance, join_style=1
+        )
+        if repaired.geom_type == "Polygon" and not repaired.is_empty:
+            return repaired
+
+    raise ValueError("First-layer trace could not be converted into one valid polygon.")
 
 
 def _choose_quadrant_holes(inner, outer, inset_mm: float, diameter_mm: float):
