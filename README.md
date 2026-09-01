@@ -1,3 +1,7 @@
+## Fabricated Artwork Showcase
+
+See the finished fabricated pieces at [Lazy Layerzzz](https://www.lazylayerzzz.com/).
+
 ## Multi Layered Wood Art Generator
 
 This project turns an input image into a set of layered, laser-cuttable masks using a three-stage pipeline:
