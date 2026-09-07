@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { FinishedDimensions } from "./FinishedDimensions";
 import { useLibrary } from "../hooks/useLibrary";
 import { LibraryProjectEntry, LibraryRunEntry } from "../types";
 import "../styles/library-page.css";
@@ -155,6 +156,7 @@ export function LibraryPage({ onBackToGenerator }: LibraryPageProps) {
 
           {selectedRun && (
             <>
+              {selectedRun.run.status === "completed" && <FinishedDimensions finalDir={selectedRun.finalOutputDirAbs} />}
               <p>
                 <strong>Run ID:</strong> {selectedRun.run.runId}
               </p>

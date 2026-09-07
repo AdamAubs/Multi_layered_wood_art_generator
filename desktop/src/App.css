@@ -447,3 +447,14 @@ textarea:focus {
     width: 100%;
   }
 }
+
+/* Finished dimensions */
+.finished-size { padding: 20px; margin: 16px 0 24px; border: 1px solid #748b9b; border-radius: 12px; }
+.size-controls { display: grid; grid-template-columns: 1fr 1fr 110px; gap: 12px; margin-bottom: 12px; }
+.size-diagram { max-width: 390px; margin: 20px auto; padding-left: 46px; }
+.dimension-width { text-align: center; padding-bottom: 8px; font-weight: 600; }
+.dimension-height { float: left; writing-mode: vertical-rl; margin-left: -36px; padding-top: 35px; font-weight: 600; }
+.size-frame { position: relative; border: 2px solid #b78955; background: #d7bc96; width: 100%; }
+.size-frame img { position: absolute; border: 1px dashed #304958; box-sizing: border-box; }
+.finished-size details { margin-top: 12px; }
+@media (max-width: 520px) { .size-controls { grid-template-columns: 1fr; } }

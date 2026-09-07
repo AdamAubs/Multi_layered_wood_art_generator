@@ -17,6 +17,21 @@ OUTER_WEB_MM = 0.5
 MIN_SILHOUETTE_DOMINANCE_RATIO = 4.0
 
 
+class BoundarySilhouetteError(ValueError):
+    """Artwork is cropped by the source boundary and needs a rectangular frame."""
+
+
+def rectangular_fallback_dpi(width, height, margin_x, margin_y, requested_size, base_dpi):
+    """Fit the complete source inside the requested outer box without stretching."""
+    target = parse_size_in(requested_size)
+    if target is None:
+        return base_dpi
+    available = (target[0] - 2 * margin_x, target[1] - 2 * margin_y)
+    if min(available) <= 0:
+        raise ValueError("Requested size leaves no room for artwork inside the frame margin.")
+    return 25.4 / min(available[0] / width, available[1] / height)
+
+
 def parse_size_in(value: str | None) -> tuple[float, float] | None:
     if value is None:
         return None
@@ -86,7 +101,7 @@ def extract_first_layer_silhouette(
 
     selected_component, selected_area, touches_boundary = components[0]
     if touches_boundary:
-        raise ValueError(
+        raise BoundarySilhouetteError(
             "The dominant first-layer artwork silhouette reaches the image boundary. "
             f"{guidance}"
         )

@@ -1,5 +1,6 @@
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { FinalArtifact } from "../types";
+import { FinishedDimensions } from "./FinishedDimensions";
 import { ErrorDisplay } from "./ErrorDisplay";
 
 interface ArtifactPreviewProps {
@@ -19,6 +20,7 @@ export function ArtifactPreview({
   return (
     <section className="preview-card">
       <h2>Final Output Preview</h2>
+      {!isLoadingArtifacts && artifacts.length > 0 && <FinishedDimensions finalDir={artifacts[0].abs_path.replace(/[/\\][^/\\]+$/, "")} />}
 
       {isLoadingArtifacts && <p>Loading final artifacts...</p>}
 

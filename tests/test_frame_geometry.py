@@ -7,6 +7,8 @@ import cv2
 import numpy as np
 
 from fabrication_tools.frame_geometry import (
+    BoundarySilhouetteError,
+    rectangular_fallback_dpi,
     _polygon_from_contour,
     _silhouette_contour,
     build_first_layer_frame_geometry,
@@ -35,6 +37,15 @@ def ellipse_first_layer(width=200, height=240):
 
 
 class FirstLayerFrameGeometryTests(unittest.TestCase):
+    def test_boundary_fallback_preserves_ratio_inside_requested_size(self):
+        dpi = rectangular_fallback_dpi(1536, 1024, 5, 5, "9x6.1312", 300)
+        self.assertLessEqual(1536 * 25.4 / dpi + 10, 228.6)
+        self.assertAlmostEqual(1024 * 25.4 / dpi + 10, 6.1312 * 25.4)
+        self.assertLessEqual(1024 * 25.4 / dpi + 10, 6.1312 * 25.4)
+        self.assertEqual(rectangular_fallback_dpi(1536, 1024, 5, 5, None, 300), 300)
+        with self.assertRaises(ValueError):
+            rectangular_fallback_dpi(1536, 1024, 5, 5, "0.1x0.1", 300)
+
     def test_extracts_one_filled_enclosed_outer_trace(self):
         cumulative = ellipse_first_layer()
         cv2.circle(cumulative, (100, 120), 10, 255, thickness=-1)
@@ -76,7 +87,7 @@ class FirstLayerFrameGeometryTests(unittest.TestCase):
         cumulative = np.full((200, 200), 255, dtype=np.uint8)
         cv2.rectangle(cumulative, (0, 40), (100, 160), 0, thickness=-1)
 
-        with self.assertRaisesRegex(ValueError, "reaches the image boundary"):
+        with self.assertRaisesRegex(BoundarySilhouetteError, "reaches the image boundary"):
             extract_first_layer_silhouette(cumulative)
 
     def test_rejects_trace_touching_generator_safety_frame(self):
@@ -92,7 +103,7 @@ class FirstLayerFrameGeometryTests(unittest.TestCase):
             thickness=-1,
         )
 
-        with self.assertRaisesRegex(ValueError, "reaches the image boundary"):
+        with self.assertRaisesRegex(BoundarySilhouetteError, "reaches the image boundary"):
             extract_first_layer_silhouette(cumulative, frame_mask=frame)
 
     def test_builds_eight_mm_offset_and_four_quadrant_holes(self):

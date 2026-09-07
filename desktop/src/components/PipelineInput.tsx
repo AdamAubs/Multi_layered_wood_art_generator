@@ -1,9 +1,9 @@
 import { useState } from "react";
+import { FinishedSize } from "./FinishedSize";
 import { FrameShape, ProjectSummary } from "../types";
 
 const STOCK_PRESETS = ["12x20", "8x12", "18x24", "24x48"];
 const STOCK_SIZE_REGEX = /^\d+(\.\d+)?x\d+(\.\d+)?$/;
-const OUTER_FRAME_SIZE_PRESETS = ["5x5", "8x8", "10x10", "10x16"];
 
 const BRIDGE_PRESETS = ["3", "5", "8", "10", "12"];
 const BRIDGE_COUNT_REGEX = /^\d+$/;
@@ -139,7 +139,7 @@ export function PipelineInput({
   const outerFrameSizeIsInvalid =
     isCustomOuterFrameSize &&
     customOuterFrameSize.length > 0 &&
-    !STOCK_SIZE_REGEX.test(customOuterFrameSize);
+    !(customOuterFrameSize.split("x").length === 2 && customOuterFrameSize.split("x").every(n => Number.isFinite(Number(n)) && Number(n) > 0));
 
   const parsePositiveNumber = (value: string) => {
     const parsed = Number(value);
@@ -163,7 +163,7 @@ export function PipelineInput({
   const outerFrameBoundsAreInvalid = (() => {
     if (
       outerFrameSizeValue === null ||
-      !STOCK_SIZE_REGEX.test(outerFrameSizeValue) ||
+      outerFrameSizeIsInvalid ||
       frameMarginValue === null ||
       settingHoleDiameterValue === null ||
       settingHoleInsetValue === null
@@ -338,6 +338,10 @@ export function PipelineInput({
               Set the physical frame, stock, mounting, and delivery options.
             </p>
           </div>
+          <FinishedSize imagePath={imagePath} value={outerFrameSizeValue}
+            onChange={value => { setOuterFrameSizePreset(value === null ? "none" : "other"); setCustomOuterFrameSize(value ?? ""); }}
+            margin={frameShape === "first_layer" ? Math.max(frameMarginValue ?? 0, (settingHoleInsetValue ?? 0) + (settingHoleDiameterValue ?? 0) + 0.5) : frameMarginValue ?? 0}
+            shape={frameShape} disabled={isDisabled} />
           <div className="parameter-grid fabrication-grid">
             <label className="parameter-field parameter-field-wide">
               <span>Frame shape</span>
@@ -358,7 +362,7 @@ export function PipelineInput({
 
             <label className="parameter-field">
               <span>
-                Stock size <em>(inches)</em>
+                Stock sheet size <em>(inches, for cut layout)</em>
               </span>
               <select
                 value={stockPreset}
@@ -383,44 +387,6 @@ export function PipelineInput({
               )}
               {customIsInvalid && (
                 <small className="field-error">Use WxH, such as 12x20.</small>
-              )}
-            </label>
-
-            <label className="parameter-field">
-              <span>
-                Final outer frame size <em>(inches)</em>
-              </span>
-              <select
-                value={outerFrameSizePreset}
-                onChange={(e) => setOuterFrameSizePreset(e.currentTarget.value)}
-                disabled={isDisabled}
-              >
-                <option value="none">Use image DPI (default)</option>
-                {OUTER_FRAME_SIZE_PRESETS.map((preset) => (
-                  <option key={preset} value={preset}>
-                    {preset}
-                  </option>
-                ))}
-                <option value="other">Custom...</option>
-              </select>
-              {frameShape === "first_layer" && (
-                <small>
-                  The shaped outline fits inside this box without stretching;
-                  one dimension may be smaller.
-                </small>
-              )}
-              {isCustomOuterFrameSize && (
-                <input
-                  value={customOuterFrameSize}
-                  onChange={(e) =>
-                    setCustomOuterFrameSize(e.currentTarget.value)
-                  }
-                  placeholder="e.g. 10x16"
-                  disabled={isDisabled}
-                />
-              )}
-              {outerFrameSizeIsInvalid && (
-                <small className="field-error">Use WxH, such as 10x16.</small>
               )}
             </label>
 
