@@ -9,7 +9,7 @@ mod library_types;
 mod library_store;
 
 pub use types::{JobStatus, JobSnapshot, PaletteColor, LayerWinner, FinalArtifact, JobState};
-pub use artifacts::list_final_artifacts;
+pub use artifacts::{list_final_artifacts, read_finished_dimensions};
 pub use pipeline::{start_job, get_job_status};
 pub use template_store::{list_templates, save_template, delete_template};
 pub use library_store::{ensure_library_initialized, list_projects, create_project, list_library_projects_with_runs, open_in_file_browser};
@@ -27,6 +27,7 @@ pub fn run() {
             start_job,
             get_job_status,
             list_final_artifacts,
+            read_finished_dimensions,
             list_templates,
             save_template,
             delete_template,

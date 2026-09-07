@@ -1,4 +1,5 @@
 import argparse
+import json
 import math
 import os
 import re
@@ -15,6 +16,7 @@ from fabrication_tools.settings import (
     merge_fabrication_settings as merge_package_fabrication_settings,
 )
 from fabrication_tools.frame_geometry import FRAME_SHAPES
+from fabrication_tools.dimensions import write_dimensions_report
 
 
 def parse_args():
@@ -510,6 +512,15 @@ def main():
     if run_step(postprocessor_cmd, "Postprocessor", run_log) != 0:
         return 1
 
+    # Postprocessing may resolve a shaped request to a rectangular frame.
+    # Keep its actual geometry authoritative for mounting, reports and releases.
+    with open(os.path.join(final_output, "fabrication_settings.json")) as settings_file:
+        resolved = json.load(settings_file)
+    fabrication_settings["dxf"].update(resolved["dxf"])
+    fabrication_settings["outer_frame"].update(resolved["outer_frame"])
+    args.frame_shape = resolved["dxf"]["frame_shape"]
+    dxf_dpi_x = resolved["dxf"]["dpi_x"]
+    dxf_dpi_y = resolved["dxf"]["dpi_y"]
     merge_package_fabrication_settings(final_output, fabrication_settings)
 
     if args.add_french_cleats:
@@ -556,6 +567,8 @@ def main():
 
         fabrication_settings["french_cleats"]["generated"] = True
         merge_package_fabrication_settings(final_output, fabrication_settings)
+
+    write_dimensions_report(final_output, args.fab_size_in, args.frame_shape)
 
     if args.create_etsy_release:
         cleat_mode = "include" if args.add_french_cleats else "exclude"

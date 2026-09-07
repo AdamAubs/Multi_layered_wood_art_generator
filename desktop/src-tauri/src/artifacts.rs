@@ -82,3 +82,11 @@ pub fn list_final_artifacts(final_dir: String) -> Result<Vec<FinalArtifact>, Str
 
     Ok(out)
 }
+#[tauri::command]
+pub fn read_finished_dimensions(final_dir: String) -> Result<Option<serde_json::Value>, String> {
+    let path = PathBuf::from(final_dir).join("dimensions.json");
+    if !path.exists() { return Ok(None); }
+    let text = fs::read_to_string(path).map_err(|e| format!("Cannot read dimensions: {e}"))?;
+    let value = serde_json::from_str(&text).map_err(|e| format!("Invalid dimensions: {e}"))?;
+    Ok(Some(value))
+}

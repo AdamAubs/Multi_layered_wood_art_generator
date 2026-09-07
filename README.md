@@ -27,6 +27,12 @@ Best results usually come from images with a small number of clear, flat color r
 
 If you are generating a new image, see [image_gen_prompts/generic-reccomendations.md](image_gen_prompts/generic-reccomendations.md) for prompt ideas and composition tips that fit this pipeline well.
 
+In the desktop app, choose your image and enter **Finished outer size, including frame** in inches or millimeters before starting the job. The live preview shows the outer dimensions and inner artwork area. With proportions locked, editing either dimension calculates the other using the source image ratio and frame margin. Unlock to set both dimensions independently; a warning identifies stretching. The proportions lock also recalculates height when the frame margin or source image changes.
+
+Leaving dimensions blank uses the calculated default: source pixels divided by 300, plus the frame margin. This does not read image DPI metadata. For a first-layer outline, the selected size is a maximum bounding box and the preview is approximate until tracing finishes. Stock sheet dimensions control the cut layout separately.
+
+Successful pipeline runs save `dimensions.json`, measured from the exported millimeter DXF layer geometry. The final preview and Library show overall and per-layer bounds in inches and millimeters. Older runs without this report are labeled accordingly. The source raster is not resampled when choosing a physical size.
+
 If you want the final DXF files to end up at a specific physical size, add `--fab-size-in`. The value uses `WxH` inches, such as `5x5`, and the pipeline computes the needed DXF DPI automatically:
 
 ```bash
@@ -463,3 +469,5 @@ Liu, H., Li, Z., Wu, K., Cai, Y., Zhai, X., Zhang, K., Liu, L., Xie, Y. M., & Fu
 ```
 
 </details>
+
+When a first-layer silhouette reaches the source boundary, postprocessing falls back to a rectangular frame and records a warning in the package and results. The complete source fits within the requested maximum dimensions without stretching. Other invalid silhouettes (such as competing traces) still require correction.

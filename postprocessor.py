@@ -18,6 +18,8 @@ from fabrication_tools.settings import (
     write_fabrication_settings,
 )
 from fabrication_tools.frame_geometry import (
+    BoundarySilhouetteError,
+    rectangular_fallback_dpi,
     FRAME_GEOMETRY_FILENAME,
     FRAME_SHAPES,
     build_first_layer_frame_geometry,
@@ -1637,6 +1639,8 @@ def main():
     print("All layer images loaded.\n")
 
     frame_geometry = None
+    frame_warning = None
+    requested_frame_shape = args.frame_shape
     if args.frame_shape == "first_layer":
         try:
             silhouette = extract_first_layer_silhouette(
@@ -1651,9 +1655,27 @@ def main():
                 base_dpi=args.dxf_dpi,
                 requested_size_in=args.fab_size_in,
             )
+        except BoundarySilhouetteError:
+            frame_warning = (
+                "Artwork reaches the source boundary; using a rectangular frame "
+                "instead of a first-layer outline. The full composition is preserved "
+                "without stretching and fits within the requested maximum size."
+            )
+            print(f"Warning: {frame_warning}")
+            args.frame_shape = "rectangle"
+            try:
+                args.dxf_dpi = rectangular_fallback_dpi(
+                    w, h, args.dxf_frame_margin_x_mm, args.dxf_frame_margin_y_mm,
+                    args.fab_size_in, args.dxf_dpi,
+                )
+            except ValueError as exc:
+                print(f"Error: {exc}")
+                return 1
+            args.dxf_dpi_x = args.dxf_dpi_y = args.dxf_dpi
         except (ValueError, ImportError) as exc:
             print(f"Error: {exc}")
             return 1
+    if frame_geometry is not None:
         args.dxf_dpi = frame_geometry["dpi"]
         args.dxf_dpi_x = frame_geometry["dpi_x"]
         args.dxf_dpi_y = frame_geometry["dpi_y"]
@@ -1927,6 +1949,8 @@ def main():
             final_dir,
             {
                 "schema_version": 1,
+                "requested_frame_shape": requested_frame_shape,
+                "warnings": [frame_warning] if frame_warning else [],
                 "dxf": {
                     "dpi": args.dxf_dpi_y,
                     "dpi_x": args.dxf_dpi_x,
